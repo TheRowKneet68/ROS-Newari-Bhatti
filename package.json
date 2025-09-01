@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
