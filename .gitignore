@@ -1,5 +1,12 @@
-node_modules
-# Keep environment variables out of version control
+# dependencies
+/node_modules
+
+# builds
+/.next
+/out
+
+# environment
 .env
 
-/lib/generated/prisma
+# misc
+.DS_Store
