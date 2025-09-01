@@ -1,9 +1,17 @@
-// next.config.ts
+import type { NextConfig } from "next";
+
 const nextConfig: NextConfig = {
-  images: { unoptimized: true },
-  eslint: { ignoreDuringBuilds: true },
+  images: {
+    unoptimized: true,
+  },
+  eslint: {
+    // 🚀 Ignore ESLint errors/warnings during builds
+    ignoreDuringBuilds: true,
+  },
   typescript: {
-    // 🚀 Allow production builds even if type errors exist
+    // 🚀 Ignore TS type errors during builds (optional, if needed)
     ignoreBuildErrors: true,
   },
 };
+
+export default nextConfig;
