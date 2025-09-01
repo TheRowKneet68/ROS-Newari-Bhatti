@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/utils/supabaseClient.ts";
+import { supabase } from "@/lib/supabaseClient";
 import Header from "@/components/Header";
 import Link from "next/link";
 
