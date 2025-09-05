@@ -181,14 +181,14 @@ export default function ContactPage() {
             <div className="aspect-video rounded-lg overflow-hidden cursor-pointer" 
                  onClick={() => window.open(`https://www.google.com/maps/place/${restaurantInfo.coordinates}`, '_blank')}>
               <iframe
-                src={`https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3515.123456789!2d83.99098268394296!3d28.22886241546525!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3995937bbf0376ff%3A0x123456789abcdef!2sNadipur%2C%20Pokhara%2033700%2C%20Nepal!5e0!3m2!1sen!2snp!4v1234567890123!5m2!1sen!2snp`}
+                src={`https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d219.70586196168153!2d83.9908873!3d28.2287612!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x399595c315c578db%3A0x4c21b4257a106489!2sNewari%20Bhatti%20and%20Kathmandu%20momo%20ghar!5e0!3m2!1sen!2snp!4v1757060425626!5m2!1sen!2snp`}
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}
                 allowFullScreen
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
-                title="Newari Bhatti Location"
+                title="Newari Bhatti & Kathmandu Momo Ghar Location"
               ></iframe>
             </div>
             <div className="mt-4 p-4 bg-orange-50 rounded-lg">

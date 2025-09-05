@@ -12,7 +12,7 @@ export default function Home() {
   const [userType, setUserType] = useState('');
   const [restaurantInfo, setRestaurantInfo] = useState({
     name: 'Newari Bhatti and Kathmandu Momo Ghar',
-    phone: '+977-61-523456',
+    phone: '+977-9829117277',
     email: 'info@newaribhatti.com',
     address: 'Nadipur, Pokhara 33700, Nepal',
     coordinates: '28.22886241546525, 83.99098268394296'
@@ -473,7 +473,7 @@ export default function Home() {
             <div className="aspect-video rounded-2xl overflow-hidden cursor-pointer" 
                  onClick={() => window.open(`https://www.google.com/maps/place/${restaurantInfo.coordinates}`, '_blank')}>
               <iframe
-                src={`https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3515.123456789!2d83.99098268394296!3d28.22886241546525!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3995937bbf0376ff%3A0x123456789abcdef!2sNadipur%2C%20Pokhara%2033700%2C%20Nepal!5e0!3m2!1sen!2snp!4v1234567890123!5m2!1sen!2snp`}
+                src={`https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d219.70586196168153!2d83.9908873!3d28.2287612!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x399595c315c578db%3A0x4c21b4257a106489!2sNewari%20Bhatti%20and%20Kathmandu%20momo%20ghar!5e0!3m2!1sen!2snp!4v1757060425626!5m2!1sen!2snp`}
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}
@@ -487,6 +487,22 @@ export default function Home() {
         </div>
       </section>
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
       {/* Footer */}
       <footer className="bg-gray-800 text-white py-12">
         <div className="container mx-auto px-4">
@@ -496,7 +512,7 @@ export default function Home() {
                 <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
                   <i className="ri-restaurant-line text-white text-lg"></i>
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti</span>
+                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti & Kathmandu Momo Ghar </span>
               </div>
               <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
             </div>

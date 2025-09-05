@@ -65,7 +65,7 @@ export default function Header() {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/" className="text-2xl font-['Pacifico'] text-orange-600 cursor-pointer">
-            Newari Bhatti
+            Newari Bhatti and Kathmandu Momo Ghar
           </Link>
 
           {/* Desktop Navigation */}
