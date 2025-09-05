@@ -496,7 +496,7 @@ export default function Home() {
                 <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
                   <i className="ri-restaurant-line text-white text-lg"></i>
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti</span>
+                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti & Kathmandu Momo Ghar</span>
               </div>
               <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
             </div>
