@@ -1,0 +1,58 @@
+# 4) Ensure .gitignore exists and contains Next/Node entries (appends if already present)
+@"
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Env / Secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+coverage/
+"@ | Out-File -FilePath .gitignore -Encoding UTF8 -Append
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Env / Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+service-account*.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+coverage/
