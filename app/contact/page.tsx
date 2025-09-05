@@ -188,7 +188,7 @@ export default function ContactPage() {
                 allowFullScreen
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
-                title="Newari Bhatti Location"
+                title="Newari Bhatti & Kathmandu Momo Ghar Location"
               ></iframe>
             </div>
             <div className="mt-4 p-4 bg-orange-50 rounded-lg">
