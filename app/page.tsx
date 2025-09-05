@@ -12,9 +12,9 @@ export default function Home() {
   const [userType, setUserType] = useState('');
   const [restaurantInfo, setRestaurantInfo] = useState({
     name: 'Newari Bhatti and Kathmandu Momo Ghar',
-    phone: '+977-61-523456',
+    phone: '+977-9829117277',
     email: 'info@newaribhatti.com',
-    address: 'Nadipur, Pokhara 33700, Nepal',
+    address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
     coordinates: '28.22886241546525, 83.99098268394296'
   });
   const [featuredItems, setFeaturedItems] = useState<any[]>([]);
