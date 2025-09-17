@@ -1540,7 +1540,6 @@ const updateRestaurantInfo = async (info: any) => {
 
 
 
-
 const deleteReview = async (reviewId: number) => {
   // if (!confirm('Are you sure you want to delete this review?')) return;
 
@@ -1555,31 +1554,41 @@ const deleteReview = async (reviewId: number) => {
       body: JSON.stringify({ reviewId: Number(reviewId) })
     });
 
+    // read raw text so we can log or attempt JSON parse for both ok and non-ok
+    const raw = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = { raw }; }
+
     if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.warn('Server delete returned non-OK:', res.status, txt);
-      showErrorToast('Failed to delete review (network).');
+      console.error('[deleteReview] server returned non-OK', res.status, body);
+      // show server-provided error if any, otherwise a generic message
+      const serverMsg = body?.error || body?.message || (body?.raw && String(body.raw)) || 'Unknown server error';
+      showErrorToast('Failed to delete review: ' + serverMsg);
+      setReviews(prev); // revert optimistic update
+      return;
+    }
+
+    // res.ok
+    if (!body || body.success === false) {
+      console.warn('[deleteReview] delete responded but reported failure:', body);
+      const serverMsg = body?.error || 'Delete failed';
+      showErrorToast('Failed to delete review: ' + serverMsg);
       setReviews(prev); // revert
       return;
     }
 
-    const data = await res.json().catch(() => null);
-    if (!data || !data.success) {
-      console.warn('Server delete error:', data);
-      showErrorToast('Failed to delete review. Please try again.');
-      setReviews(prev); // revert
-      return;
-    }
-
+    console.log('[deleteReview] success:', body);
     showSuccessToast('Review deleted successfully!');
-    // optional: refresh from server to be sure
+    // optional: refresh list from server
     await loadReviews();
   } catch (err) {
-    console.log('Error deleting review:', err);
-    showErrorToast('Error deleting review. Please try again.');
-    setReviews(prev); // revert
+    // network-level or unexpected JS error
+    console.error('[deleteReview] network / unexpected error:', err);
+    showErrorToast('Failed to delete review (network). See console for details.');
+    setReviews(prev); // revert optimistic update
   }
 };
+
 
 
 
