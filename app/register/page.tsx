@@ -123,7 +123,7 @@ export default function RegisterPage() {
               <i className="ri-user-add-line text-2xl text-orange-600"></i>
             </div>
             <h1 className="text-2xl font-bold text-gray-800 mb-2">Create Account</h1>
-            <p className="text-gray-600">Join Newari Bhatti family</p>
+            <p className="text-gray-600">Join Newari Bhatti & Kathmandu Momo Ghar family</p>
           </div>
 
           {errors.general && (

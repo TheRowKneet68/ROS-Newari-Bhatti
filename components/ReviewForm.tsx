@@ -108,7 +108,7 @@ export default function ReviewForm({ onSubmit }: ReviewFormProps) {
             value={formData.text}
             onChange={(e) => setFormData(prev => ({ ...prev, text: e.target.value }))}
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none"
-            placeholder="Share your experience at Newari Bhatti..."
+            placeholder="Share your experience at Newari Bhatti and Kathmandu Momo Ghar..."
             rows={4}
             maxLength={500}
             required

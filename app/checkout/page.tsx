@@ -4,16 +4,7 @@ import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-
-
-
-import { supabase } from '../../lib/supabaseClient'; // adjust path
-
-
-
-
-
-
+import { supabase } from '../../lib/supabaseClient'; // keep your existing client
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -43,39 +34,38 @@ export default function CheckoutPage() {
 
   const loadMenuAndCart = async () => {
     try {
-      // First load menu items from database
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
         },
-        body: JSON.stringify({
-          action: 'getMenuData'
-        })
+        body: JSON.stringify({ action: 'getMenuData' })
       });
 
       const data = await response.json();
       if (data.success && data.menuItems) {
         setMenuItems(data.menuItems);
-        
-        // Now load cart with real menu data
+
         const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
         const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => {
           const item = data.menuItems.find((i: any) => i.id === parseInt(itemId));
           if (item) {
             return {
               ...item,
-              quantity: quantity as number
+              quantity: quantity as number,
+              specialInstructions: ''
             };
           }
           return null;
         }).filter(item => item !== null);
-        
-        setCartItems(cartArray);
+
+        setCartItems(cartArray as any[]);
+      } else {
+        console.error('Failed to load menu items from function');
       }
-      
-      // Load user info if logged in
+
+      // Load user info if logged in (local fallback)
       const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
       if (isLoggedIn) {
         const userInfo = JSON.parse(localStorage.getItem('userData') || '{}');
@@ -88,206 +78,175 @@ export default function CheckoutPage() {
           });
         }
       }
-
     } catch (error) {
-      console.log('Error loading menu and cart:', error);
+      console.error('Error loading menu and cart:', error);
     }
   };
 
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0);
   const deliveryFee = orderType === 'delivery' ? 50 : 0;
   const tax = Math.round((subtotal + deliveryFee) * 0.13);
   const total = subtotal + deliveryFee + tax;
-
-
-
-
-
-
-
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const currentUserId = localStorage.getItem('userId');
-      const authToken = localStorage.getItem('authToken');
-      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-      
+      // Try to get supabase user (if logged in)
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData?.user ?? null;
+      const currentUserId = localStorage.getItem('userId') || (user ? user.id : null);
+      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true' || !!user;
+
+      // Prepare items payload: map to simple objects to avoid circular refs
+      const itemsPayload = cartItems.map(i => ({
+        id: i.id,
+        name: i.name,
+        price: Number(i.price || 0),
+        quantity: Number(i.quantity || 0),
+        specialInstructions: i.specialInstructions || ''
+      }));
+
       const orderData = {
-        customer: customerInfo,
-        items: cartItems,
-        orderType,
+        customer: {
+          firstName: customerInfo.firstName,
+          lastName: customerInfo.lastName,
+          email: customerInfo.email,
+          phone: customerInfo.phone
+        },
+        items: itemsPayload,
+        order_type: orderType,
         address: orderType === 'delivery' ? address : null,
         subtotal,
-        deliveryFee,
+        delivery_fee: deliveryFee,
         tax,
         total,
-        paymentMethod: paymentMethod === 'cod' ? 'Cash on Delivery' : 'Card Payment',
-        specialInstructions,
-        estimatedTime: orderType === 'delivery' ? 45 : 30,
-        userId: currentUserId
+        payment_method: paymentMethod === 'cod' ? 'Cash on Delivery' : 'Card Payment',
+        special_instructions: specialInstructions,
+        estimated_time: orderType === 'delivery' ? 45 : 30,
+        user_id: currentUserId,
+        status: 'placed'
       };
 
       console.log('Placing order with data:', orderData);
 
-      let orderId;
-      let orderSaved = false;
+      let orderId: any = null;
+      let dbSaved = false;
 
-      // Try to save to database first if user is logged in
-      // if (isLoggedIn && authToken) {
-      if (isLoggedIn ) {
-        try {
-          const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/order-service`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({
-              action: 'createOrder',
-              orderData,
-              userId: currentUserId
-            })
-          });
+      // Attempt Supabase insert (client-side). This requires RLS or table settings to allow insert.
+      try {
+        // NOTE: change column names below if your orders table uses different names
+        const { data: inserted, error: insertError } = await supabase
+          .from('orders')
+          .insert([{
+            user_id: orderData.user_id,
+            customer: orderData.customer,
+            items: orderData.items,
+            order_type: orderData.order_type,
+            address: orderData.address,
+            subtotal: orderData.subtotal,
+            delivery_fee: orderData.delivery_fee,
+            tax: orderData.tax,
+            total: orderData.total,
+            payment_method: orderData.payment_method,
+            special_instructions: orderData.special_instructions,
+            estimated_time: orderData.estimated_time,
+            status: orderData.status
+          }])
+          .select()
+          .single();
 
-          if (response.ok) {
-            const data = await response.json();
-            console.log('Order service response:', data);
-            
-            if (data.success && data.order) {
-              orderId = data.order.id;
-              orderSaved = true;
-              console.log('Order successfully saved to database:', orderId);
-            }
-          }
-        } catch (dbError) {
-          console.log('Database save failed, using localStorage fallback:', dbError);
+        if (insertError) {
+          console.error('Supabase insert error:', insertError);
+        } else if (inserted) {
+          dbSaved = true;
+          orderId = inserted.id ?? (`SB-${Date.now().toString().slice(-8)}`);
+          console.log('Order inserted into Supabase:', inserted);
         }
+      } catch (dbErr) {
+        console.error('Error inserting order to Supabase:', dbErr);
       }
 
-      // Always save to localStorage as backup (for both logged in and guest users)
-      if (!orderSaved) {
-        console.log('Using localStorage storage');
+      // Fallback if DB save failed
+      if (!dbSaved) {
         orderId = 'NB-' + Date.now().toString().slice(-8) + Math.random().toString(36).substr(2, 4).toUpperCase();
+        console.warn('DB save failed — using local fallback id:', orderId);
       }
 
-      // Create order object for localStorage
+      // Build final order object for localStorage
       const order = {
         id: orderId,
         ...orderData,
         created_at: new Date().toISOString(),
-        orderDate: new Date().toISOString(),
-        status: 'placed',
-        userId: currentUserId,
-        user_id: currentUserId
+        orderDate: new Date().toISOString()
       };
 
-      // Always save to localStorage for immediate access
+      // Save to userOrders and allOrders localStorage for immediate access
       const existingOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
-      existingOrders.unshift(order); // Add to beginning (latest first)
+      existingOrders.unshift(order);
       localStorage.setItem('userOrders', JSON.stringify(existingOrders));
 
-      // Also save to allOrders for admin access
       const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-      allOrders.unshift(order); // Add to beginning (latest first)
+      allOrders.unshift(order);
       localStorage.setItem('allOrders', JSON.stringify(allOrders));
 
-      console.log('Order saved to localStorage:', orderId);
-
-      // Clear cart
+      // Clear cart localStorage and state
       localStorage.removeItem('cartItems');
-      
-      // Show success message
+      setCartItems([]);
+
       alert(`Order placed successfully! Order ID: ${orderId}`);
-      
-      // Redirect to orders page
       router.push('/orders');
 
     } catch (error) {
-      console.log('Error placing order:', error);
+      console.error('Error placing order:', error);
       alert('Error placing order. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
+  const fetchUserProfile = async () => {
+    try {
+      const { data, error: authError } = await supabase.auth.getUser();
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    const fetchUserProfile = async () => {
-      try {
-        // Get the current logged-in user from Supabase Auth
-        const { data, error: authError } = await supabase.auth.getUser();
-
-        if (authError || !data?.user) {
-          console.log('User not logged in', authError?.message);
-          return;
-        }
-
-        const user = data.user; // now safely access user
-
-        // Fetch user profile from your database table (e.g., "profiles")
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-
-        if (profileError) {
-          console.log('Profile fetch error:', profileError.message);
-          return;
-        }
-
-        setCustomerInfo({
-          firstName: profile.first_name || '',
-          lastName: profile.last_name || '',
-          email: user.email || '',
-          phone: profile.phone || ''
-        });
-
-        setAddress({
-          street: profile.street || '',
-          city: profile.city || '',
-          state: profile.state || '',
-          zipCode: profile.zip_code || ''
-        });
-
-      } catch (error) {
-        console.log('Error fetching user profile:', error);
+      if (authError || !data?.user) {
+        console.log('User not logged in', authError?.message);
+        return;
       }
-    };
 
+      const user = data.user;
 
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
+      if (profileError) {
+        console.log('Profile fetch error:', profileError.message);
+        return;
+      }
 
+      setCustomerInfo({
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        email: user.email || '',
+        phone: profile.phone || ''
+      });
 
+      setAddress({
+        street: profile.street || '',
+        city: profile.city || '',
+        state: profile.state || '',
+        zipCode: profile.zip_code || ''
+      });
 
+    } catch (error) {
+      console.log('Error fetching user profile:', error);
+    }
+  };
 
-
-
-
-
-
-
-
-
-  
   if (cartItems.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -309,15 +268,13 @@ export default function CheckoutPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
-      
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold text-gray-800 mb-8">Checkout</h1>
 
           <form onSubmit={handlePlaceOrder} className="grid lg:grid-cols-2 gap-8">
-            {/* Order Details */}
+            {/* Left side (Order details) */}
             <div className="space-y-6">
-              {/* Order Type */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Order Type</h2>
                 <div className="grid grid-cols-2 gap-4">
@@ -325,9 +282,7 @@ export default function CheckoutPage() {
                     type="button"
                     onClick={() => setOrderType('pickup')}
                     className={`p-4 border-2 rounded-lg transition-colors cursor-pointer ${
-                      orderType === 'pickup'
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                      orderType === 'pickup' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
                     <i className="ri-store-line text-2xl mb-2 block"></i>
@@ -338,9 +293,7 @@ export default function CheckoutPage() {
                     type="button"
                     onClick={() => setOrderType('delivery')}
                     className={`p-4 border-2 rounded-lg transition-colors cursor-pointer ${
-                      orderType === 'delivery'
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                      orderType === 'delivery' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
                     <i className="ri-truck-line text-2xl mb-2 block"></i>
@@ -350,7 +303,6 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Customer Information */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Customer Information</h2>
                 <div className="grid grid-cols-2 gap-4">
@@ -397,7 +349,6 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Delivery Address */}
               {orderType === 'delivery' && (
                 <div className="bg-white rounded-2xl shadow-lg p-6">
                   <h2 className="text-xl font-semibold mb-4">Delivery Address</h2>
@@ -448,7 +399,6 @@ export default function CheckoutPage() {
                 </div>
               )}
 
-              {/* Special Instructions */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Special Instructions</h2>
                 <textarea
@@ -461,7 +411,6 @@ export default function CheckoutPage() {
                 />
               </div>
 
-              {/* Payment Method */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
                 <div className="space-y-3">
@@ -502,13 +451,12 @@ export default function CheckoutPage() {
             <div className="lg:sticky lg:top-8 h-fit">
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Order Summary</h2>
-                
-                {/* Cart Items */}
+
                 <div className="space-y-4 mb-6">
                   {cartItems.map((item) => (
                     <div key={item.id} className="flex items-center space-x-3">
-                      <img 
-                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%20clean%20background&width=120&height=120&seq=checkout-item&orientation=squarish'} 
+                      <img
+                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%20clean%20background&width=120&height=120&seq=checkout-item&orientation=squarish'}
                         alt={item.name}
                         className="w-12 h-12 object-cover object-top rounded-lg"
                       />
@@ -521,7 +469,6 @@ export default function CheckoutPage() {
                   ))}
                 </div>
 
-                {/* Pricing */}
                 <div className="border-t pt-4 space-y-2">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
@@ -543,19 +490,7 @@ export default function CheckoutPage() {
                   </div>
                 </div>
 
-                {/* User Info Display */}
-                {localStorage.getItem('isLoggedIn') === 'true' && (
-                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <i className="ri-user-line text-green-600"></i>
-                      <span className="text-sm text-green-800">
-                        Order will be saved to: {localStorage.getItem('userEmail')}
-                      </span>
-                    </div>
-                  </div>
-                )}
 
-                {/* Estimated Time */}
                 <div className="mt-6 p-4 bg-orange-50 rounded-lg">
                   <div className="flex items-center space-x-2">
                     <i className="ri-time-line text-orange-600"></i>
@@ -565,7 +500,6 @@ export default function CheckoutPage() {
                   </div>
                 </div>
 
-                {/* Place Order Button */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -589,6 +523,6 @@ export default function CheckoutPage() {
           </form>
         </div>
       </div>
-    </div>  
+    </div>
   );
 }

@@ -3,16 +3,34 @@
 import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function CartPage() {
+  const router = useRouter();
+
   const [cartItems, setCartItems] = useState<any[]>([]);
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
+  // auth check state to avoid UI flash
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   useEffect(() => {
+    // check auth status synchronously from localStorage
+    // const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
+    const loggedIn = localStorage.getItem('isLoggedIn');
+    if (!loggedIn) {
+      // redirect to login and stop further processing
+      router.replace('/login');
+      return;
+    }
+
+    // if logged in continue to load menu & cart
+    setCheckingAuth(false);
     loadMenuAndCart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadMenuAndCart = async () => {
@@ -108,6 +126,11 @@ export default function CartPage() {
   const deliveryFee = subtotal > 500 ? 0 : 50;
   const tax = Math.round((subtotal - discountAmount) * 0.13); // 13% VAT in Nepal
   const total = subtotal - discountAmount + deliveryFee + tax;
+
+  // while we confirm auth redirect, don't render the cart UI (avoids flash)
+  if (checkingAuth) {
+    return null;
+  }
 
   if (loading) {
     return (

@@ -65,7 +65,7 @@ export default function Header() {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/" className="text-2xl font-['Pacifico'] text-orange-600 cursor-pointer">
-            Newari Bhatti
+            Newari Bhatti and Kathmandu Momo Ghar
           </Link>
 
           {/* Desktop Navigation */}
@@ -79,8 +79,8 @@ export default function Header() {
             <Link href="/contact" className="text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
               Contact
             </Link>
-            <Link href="/terms" className="text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
-              Terms
+            <Link href="/reviews" className="text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
+              Reviews
             </Link>
             
             {isLoggedIn && (
@@ -178,8 +178,8 @@ export default function Header() {
               <Link href="/contact" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
                 Contact
               </Link>
-              <Link href="/terms" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                Terms
+              <Link href="/reviews" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
+                Reviews
               </Link>
               
               {isLoggedIn && (
