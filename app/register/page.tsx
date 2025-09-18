@@ -3,9 +3,11 @@
 import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [formData, setFormData] = useState({
@@ -56,58 +58,80 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     setErrors({});
-    let count = 0;
 
     try {
-      // 1️⃣ Count how many users are already in the users table
-      const { count, error: countError } = await supabase
+      // 1) Count users in DB to decide first user type (superadmin) vs user
+      const { count: usersCount, error: countError } = await supabase
         .from('users')
         .select('id', { count: 'exact', head: true });
 
       if (countError) throw countError;
-      
-      // ✅ First 2 users → superadmin, others → user
-      const user_type = count === 0 ? 'superadmin' : 'user';
 
-      // 2️⃣ Create user in Supabase Auth with role in metadata
+      // If no rows exist, usersCount === 0 -> make first user superadmin
+      const user_type = (typeof usersCount === 'number' && usersCount === 0) ? 'superadmin' : 'user';
+
+      // Normalise address shape for DB: use `zip` property in jsonb (your DB shows "zip")
+      const addressForDb = {
+        street: formData.address.street || null,
+        city: formData.address.city || null,
+        state: formData.address.state || null,
+        zip: formData.address.zipCode || null,
+      };
+
+      // 2) Create user in Supabase Auth (signUp) with metadata
+      // supabase-js v2 uses options.data (user_metadata) for metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
           data: {
-            role: user_type, // ✅ store role in metadata
+            role: user_type, // store role in metadata (still enforce server-side)
             firstName: formData.firstName,
             lastName: formData.lastName,
             phone: formData.phone,
-            address: formData.address,
+            address: addressForDb,
           },
         },
       });
 
       if (authError) throw authError;
-      if (!authData.user) throw new Error('Registration failed.');
+      if (!authData?.user?.id) throw new Error('Registration failed: no user returned from auth');
 
-      // 3️⃣ Insert into users table with user_type
+      // 3) Insert the user row into your users table with the same auth UID
       const { error: insertError } = await supabase.from('users').insert({
-        id: authData.user.id, // keep same as auth UID
+        id: authData.user.id, // use the auth UID
         email: formData.email,
         first_name: formData.firstName,
         last_name: formData.lastName,
         phone: formData.phone,
-        address: formData.address,
+        // write JSON address (jsonb)
+        address: addressForDb,
+        // write flattened address columns for legacy compatibility
+        address_street: addressForDb.street,
+        address_city: addressForDb.city,
+        address_state: addressForDb.state,
+        address_zip_code: addressForDb.zip,
+        // set server-visible user type / role columns (frontend fallback)
         user_type,
+        role: user_type,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        // If DB insert fails, you might want to rollback the auth user — consider handling that in production.
+        throw insertError;
+      }
 
-      // 4️⃣ Redirect properly
+      // 4) Redirect user according to user_type
       if (user_type === 'superadmin') {
-        window.location.href = '/dashboard';
+        router.push('/dashboard');
       } else {
-        window.location.href = '/menu';
+        router.push('/menu');
       }
     } catch (err: any) {
-      setErrors({ general: err.message || 'Registration failed. Please try again.' });
+      console.error('Registration error:', err);
+      setErrors({ general: err?.message || 'Registration failed. Please try again.' });
     } finally {
       setIsLoading(false);
     }
