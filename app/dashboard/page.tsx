@@ -1484,13 +1484,18 @@ const updateRestaurantInfo = async (info: any) => {
     // Update React state (replace variable names below if you use different names)
     if (typeof setRestaurantInfo === 'function') {
       setRestaurantInfo(resultData);
+      try {
+  await loadRestaurantInfo();
+} catch (e) {
+  console.warn('loadRestaurantInfo after save failed', e);
+}
     } else {
       console.warn('setRestaurantInfo not found; update aborted for UI state');
     }
 
     // optional cache to localStorage
     try {
-      localStorage.setItem('restaurant_info', JSON.stringify(resultData));
+      localStorage.setItem('restaurantInfo', JSON.stringify(resultData));
     } catch (e) { /* ignore */ }
 
     // success feedback (if you have UI to show)
@@ -3345,10 +3350,15 @@ const deleteReview = async (reviewId: number) => {
                     </button>
                   </div>
                   <div className="space-y-2 text-sm">
-                    <p><strong>Name:</strong> {restaurantInfo.name}</p>
-                    <p><strong>Phone:</strong> {restaurantInfo.phone}</p>
-                    <p><strong>Email:</strong> {restaurantInfo.email}</p>
-                    <p><strong>Address:</strong> {restaurantInfo.address}</p>
+
+                    
+                    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
+                    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
+                    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
+                    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
+                  
+                  
+                  
                   </div>
                 </div>
 
@@ -3406,7 +3416,7 @@ const deleteReview = async (reviewId: number) => {
       )}
 
       {/* Restaurant Info Modal */}
-      {showRestaurantInfoModal && (
+      {showRestaurantInfoModal && restaurantInfo ? (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
@@ -3422,20 +3432,24 @@ const deleteReview = async (reviewId: number) => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target as HTMLFormElement);
-              updateRestaurantInfo({
-                name: formData.get('name') as string,
-                phone: formData.get('phone') as string,
-                email: formData.get('email') as string,
-                address: formData.get('address') as string,
-                coordinates: formData.get('coordinates') as string
-              });
+// add id from restaurantInfo so function updates instead of inserting
+updateRestaurantInfo({
+  id: restaurantInfo?.id ?? null,
+  name: String(formData.get('name') ?? ''),
+  phone: String(formData.get('phone') ?? ''),
+  email: String(formData.get('email') ?? ''),
+  address: String(formData.get('address') ?? ''),
+  coordinates: String(formData.get('coordinates') ?? '')
+});
+
+
             }} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Restaurant Name</label>
                 <input
                   type="text"
                   name="name"
-                  defaultValue={restaurantInfo.name}
+                  defaultValue={restaurantInfo?.name ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3445,17 +3459,18 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="tel"
                   name="phone"
-                  defaultValue={restaurantInfo.phone}
+                  defaultValue={restaurantInfo?.phone ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
                   name="email"
-                  defaultValue={restaurantInfo.email}
+                  defaultValue={restaurantInfo?.email ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3465,7 +3480,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="address"
-                  defaultValue={restaurantInfo.address}
+                  defaultValue={restaurantInfo?.address ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3475,7 +3490,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="coordinates"
-                  defaultValue={restaurantInfo.coordinates}
+                  defaultValue={restaurantInfo?.coordinates ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   placeholder="28.22886241546525, 83.99098268394296"
                   required
@@ -3499,7 +3514,7 @@ const deleteReview = async (reviewId: number) => {
             </form>
           </div>
         </div>
-      )}
+      ): null}
 
       {/* Add Admin Modal */}
       {showAdminModal && (
