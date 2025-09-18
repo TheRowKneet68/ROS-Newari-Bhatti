@@ -4,7 +4,7 @@ import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient'; // keep your existing client
+import { supabase } from '../../lib/supabaseClient'; // adjust path if your client is elsewhere
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -13,6 +13,8 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [loading, setLoading] = useState(false);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+
+  // Customer + address state — these will be auto-filled if user profile exists
   const [customerInfo, setCustomerInfo] = useState({
     firstName: '',
     lastName: '',
@@ -25,6 +27,7 @@ export default function CheckoutPage() {
     state: '',
     zipCode: ''
   });
+
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   useEffect(() => {
@@ -38,6 +41,7 @@ export default function CheckoutPage() {
 
   const loadMenuAndCart = async () => {
     try {
+      // optional: your existing function fetch for menu; keep as-is or adapt
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
         method: 'POST',
         headers: {
@@ -67,7 +71,7 @@ export default function CheckoutPage() {
         setCartItems(cartArray as any[]);
       } else {
         console.error('Failed to load menu items from function');
-        // Try to reconstruct cart from menuItems if none, or fallback to localStorage-only
+        // fallback: rebuild cart from saved ids
         const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
         const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => ({
           id: itemId,
@@ -116,9 +120,8 @@ export default function CheckoutPage() {
     try {
       // Try to get supabase user (if logged in)
       const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user ?? null;
+      const user = (userData as any)?.user ?? null;
       const currentUserId = localStorage.getItem('userId') || (user ? user.id : null);
-      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true' || !!user;
 
       // Prepare items payload: map to simple objects to avoid circular refs
       const itemsPayload = cartItems.map(i => ({
@@ -155,9 +158,8 @@ export default function CheckoutPage() {
       let orderId: any = null;
       let dbSaved = false;
 
-      // Attempt Supabase insert (client-side). This requires RLS or table settings to allow insert.
+      // Attempt Supabase insert (client-side).
       try {
-        // NOTE: change column names below if your orders table uses different names
         const { data: inserted, error: insertError } = await supabase
           .from('orders')
           .insert([{
@@ -189,13 +191,11 @@ export default function CheckoutPage() {
         console.error('Error inserting order to Supabase:', dbErr);
       }
 
-      // Fallback if DB save failed
       if (!dbSaved) {
         orderId = 'NB-' + Date.now().toString().slice(-8) + Math.random().toString(36).substr(2, 4).toUpperCase();
         console.warn('DB save failed — using local fallback id:', orderId);
       }
 
-      // Build final order object for localStorage
       const order = {
         id: orderId,
         ...orderData,
@@ -203,7 +203,6 @@ export default function CheckoutPage() {
         orderDate: new Date().toISOString()
       };
 
-      // Save to userOrders and allOrders localStorage for immediate access
       const existingOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
       existingOrders.unshift(order);
       localStorage.setItem('userOrders', JSON.stringify(existingOrders));
@@ -212,7 +211,6 @@ export default function CheckoutPage() {
       allOrders.unshift(order);
       localStorage.setItem('allOrders', JSON.stringify(allOrders));
 
-      // Clear cart localStorage and state
       localStorage.removeItem('cartItems');
       setCartItems([]);
 
@@ -227,65 +225,170 @@ export default function CheckoutPage() {
     }
   };
 
-  // fetch user profile and fill customer + address inputs
+  // -----------------------------
+  // NEW: fetch user profile and fill customer + address inputs (Supabase-backed)
+  // -----------------------------
+  const parseAddress = (addr: any) => {
+    if (!addr) return { street: '', city: '', state: '', zipCode: '' };
+    if (typeof addr === 'string') {
+      try {
+        const parsed = JSON.parse(addr);
+        return {
+          street: parsed.street ?? '',
+          city: parsed.city ?? '',
+          state: parsed.state ?? '',
+          zipCode: parsed.zip ?? parsed.zipCode ?? ''
+        };
+      } catch {
+        return { street: '', city: '', state: '', zipCode: '' };
+      }
+    }
+    if (typeof addr === 'object') {
+      return {
+        street: addr.street ?? '',
+        city: addr.city ?? '',
+        state: addr.state ?? '',
+        zipCode: addr.zip ?? addr.zipCode ?? ''
+      };
+    }
+    return { street: '', city: '', state: '', zipCode: '' };
+  };
+
   const fetchUserProfileAndFill = async () => {
     try {
-      // 1) try supabase auth
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      const user = userData?.user ?? null;
+      // 1) try to get supabase auth user
+      const { data: authData } = await supabase.auth.getUser();
+      const user = (authData as any)?.user ?? null;
 
+      // If not logged in, try reading from localStorage (already used elsewhere)
       if (!user) {
-        // not logged in — try localStorage fallback only (already applied in loadMenuAndCart)
+        const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+        const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+
+        if (storedUser && (storedUser.firstName || storedUser.email)) {
+          setCustomerInfo({
+            firstName: storedUser.firstName || storedUser.first_name || '',
+            lastName: storedUser.lastName || storedUser.last_name || '',
+            email: storedUser.email || storedUser.email_address || '',
+            phone: storedUser.phone || storedUser.phone_number || ''
+          });
+        }
+
+        if (storedAddress && (storedAddress.street || storedAddress.city)) {
+          setAddress({
+            street: storedAddress.street || '',
+            city: storedAddress.city || '',
+            state: storedAddress.state || '',
+            zipCode: storedAddress.zipCode || storedAddress.zip || ''
+          });
+        }
         return;
       }
 
-      // 2) fetch profile row from 'profiles' or 'users' table (adjust table name if different)
-      // This code assumes you have a 'profiles' table keyed by user's id
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('first_name,last_name,phone,street,city,state,zip_code,email')
-        .eq('id', user.id)
-        .maybeSingle();
+      // 2) attempt to fetch profile row from your users (or profiles) table
+      // adjust selected fields to match your schema
+      // try users by id (if you store user.id in users table) or by email
+      const email = (user as any).email ?? null;
+      const userId = (user as any).id ?? null;
 
-      if (profileError) {
-        console.warn('Profile fetch error (may not exist):', profileError);
+      let profile: any = null;
+      let profileErr: any = null;
+
+      // Prefer querying by user id if your users table uses user_id as PK
+      if (userId) {
+        const { data: p1, error: e1 } = await supabase
+          .from('users')
+          .select(`
+            first_name,
+            last_name,
+            phone,
+            email,
+            address,
+            address_street,
+            address_city,
+            address_state,
+            address_zip_code
+          `)
+          .eq('id', userId)
+          .maybeSingle();
+        profile = p1;
+        profileErr = e1;
       }
 
-      // Compose values: priority -> DB profile fields -> auth user email -> localStorage fallback
+      // If nothing returned, try by email
+      if (!profile && email) {
+        const { data: p2, error: e2 } = await supabase
+          .from('users')
+          .select(`
+            first_name,
+            last_name,
+            phone,
+            email,
+            address,
+            address_street,
+            address_city,
+            address_state,
+            address_zip_code
+          `)
+          .eq('email', email)
+          .maybeSingle();
+        profile = p2;
+        profileErr = e2;
+      }
+
+      if (profileErr) {
+        console.warn('Profile fetch error (may not exist):', profileErr);
+      }
+
+      // Compose values: priority -> DB profile fields -> auth user -> localStorage fallback
       const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
       const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
 
-      const firstName = profile?.first_name ?? storedUser.firstName ?? '';
+      const firstName = profile?.first_name ?? storedUser.firstName ?? (user as any).user_metadata?.full_name ?? '';
       const lastName = profile?.last_name ?? storedUser.lastName ?? '';
-      const emailFromProfile = profile?.email ?? user.email ?? storedUser.email ?? '';
+      const emailFromProfile = profile?.email ?? email ?? storedUser.email ?? '';
       const phone = profile?.phone ?? storedUser.phone ?? '';
 
-      setCustomerInfo({
-        firstName: firstName,
-        lastName: lastName,
-        email: emailFromProfile,
-        phone: phone
-      });
+      // Try to normalize address — users table might store address json or flattened columns
+      let street = '';
+      let city = '';
+      let stateVal = '';
+      let zip = '';
 
-      // address profile fields may use snake_case or camelCase; handle both possibilities
-      const street = profile?.street ?? profile?.street_address ?? storedAddress.street ?? '';
-      const city = profile?.city ?? storedAddress.city ?? '';
-      const state = profile?.state ?? storedAddress.state ?? '';
-      const zip = profile?.zip_code ?? profile?.zipCode ?? storedAddress.zipCode ?? '';
+      if (profile?.address) {
+        const parsedAddr = parseAddress(profile.address);
+        street = parsedAddr.street;
+        city = parsedAddr.city;
+        stateVal = parsedAddr.state;
+        zip = parsedAddr.zipCode;
+      } else {
+        // flattened columns fallback
+        street = profile?.address_street ?? storedAddress.street ?? '';
+        city = profile?.address_city ?? storedAddress.city ?? '';
+        stateVal = profile?.address_state ?? storedAddress.state ?? '';
+        zip = profile?.address_zip_code ?? profile?.address_zip ?? storedAddress.zipCode ?? '';
+      }
+
+      setCustomerInfo({
+        firstName,
+        lastName,
+        email: emailFromProfile,
+        phone
+      });
 
       setAddress({
         street,
         city,
-        state,
+        state: stateVal,
         zipCode: zip
       });
 
-      // Also store into localStorage for offline fallback
+      // Persist to localStorage as offline fallback
       try {
         localStorage.setItem('userData', JSON.stringify({
           firstName, lastName, email: emailFromProfile, phone
         }));
-        localStorage.setItem('userAddress', JSON.stringify({ street, city, state, zipCode: zip }));
+        localStorage.setItem('userAddress', JSON.stringify({ street, city, state: stateVal, zipCode: zip }));
       } catch (e) {
         // ignore localStorage failures
       }
@@ -493,7 +596,7 @@ export default function CheckoutPage() {
                   {cartItems.map((item) => (
                     <div key={item.id} className="flex items-center space-x-3">
                       <img
-                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%20clean%20background&width=120&height=120&seq=checkout-item&orientation=squarish'}
+                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish&width=120&height=120'}
                         alt={item.name}
                         className="w-12 h-12 object-cover object-top rounded-lg"
                       />
