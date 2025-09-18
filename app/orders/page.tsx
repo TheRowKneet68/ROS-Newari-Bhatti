@@ -104,11 +104,6 @@ const [restaurantPhone, setRestaurantPhone] = useState<string | null>(null);
     }
   };
 
-
-
-
-
-
 // --- loader for restaurant phone number ---
 const loadRestaurantPhone = async () => {
   try {
