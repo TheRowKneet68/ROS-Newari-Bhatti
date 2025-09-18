@@ -23,6 +23,14 @@ function MenuContent() {
     <div className="flex flex-col items-center">
       <div className="w-16 h-16 bg-gray-200 rounded-full mb-3" />
       <div className="w-24 h-4 bg-gray-200 rounded-full" />
+
+
+
+
+
+
+
+
     </div>
   );
 
