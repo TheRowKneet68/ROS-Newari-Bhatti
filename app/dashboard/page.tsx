@@ -2124,14 +2124,8 @@ const handleAdminSave = async (payload: any) => {
       case 'on-the-way': return 'bg-purple-400 text-purple-1200';
       case 'completed': return 'bg-green-400 text-green-1200';
       case 'cancelled': return 'bg-red-400 text-red-1200';
-
-
-
       case 'delivery': return 'bg-teal-400 text-teal-1200';
       case 'pickup': return 'bg-cyan-400 text-cyan-1200';
-
-
-
       default: return 'bg-blue-100 text-blue-800';
     }
   };
