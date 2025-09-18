@@ -26,152 +26,203 @@ export default function OrdersPage() {
 
   const pollingRef = useRef<number | null>(null);
   const realtimeRef = useRef<any>(null);
+// --- add near other useState declarations ---
+const [restaurantPhone, setRestaurantPhone] = useState<string | null>(null);
 
-  // ---------- Load orders directly from Supabase ----------
+  // ---------- loadOrders (server-backed) ----------
   const loadOrders = async () => {
     setLoading(true);
     try {
       const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
       const type = localStorage.getItem('userType') || 'user';
-      const currentUserId = localStorage.getItem('userId') || null;
-      const storedEmail = localStorage.getItem('userEmail') || null;
+      const currentUserId = localStorage.getItem('userId') || '';
+      const storedEmail = localStorage.getItem('userEmail') || '';
 
-      let query = supabase.from('orders').select('*');
+      // build query params so server can filter safely (server route still should verify in prod)
+      const params = new URLSearchParams();
+      params.set('role', type);
+      if (currentUserId) params.set('userId', currentUserId);
+      if (storedEmail) params.set('email', storedEmail);
 
-      // Admins get all orders
-      if (!['admin', 'superadmin'].includes(type)) {
-        // For regular users: attempt to filter by user id, fallback to email
-        if (currentUserId) {
-          query = query.eq('user_id', currentUserId).or(`userId.eq.${currentUserId}`);
-        } else if (storedEmail) {
-          // Some setups store user_email on order
-          query = query.or(`user_email.eq.${storedEmail},customer_email.eq.${storedEmail}`);
+      // include auth token in Authorization header so server can verify user identity
+      const authToken = localStorage.getItem('authToken') || localStorage.getItem('supabase.auth.token') || '';
+      const res = await fetch(`/api/orders/list?${params.toString()}`, {
+        headers: {
+          Authorization: authToken ? `Bearer ${authToken}` : ''
+        }
+      });
+
+      const txt = await res.text().catch(() => '');
+      let payload: any = null;
+      try { payload = txt ? JSON.parse(txt) : null; } catch (e) { payload = { raw: txt }; }
+
+      if (!res.ok || payload?.success === false) {
+        console.warn('orders/list returned error or non-OK:', res.status, payload);
+        // fallback: try localStorage cache or empty
+        const cached = JSON.parse(localStorage.getItem('allOrders') || '[]');
+        if (!['admin','superadmin'].includes(type)) {
+          const filtered = cached.filter((o: any) => {
+            if (currentUserId) return (o.user_id ?? o.userId ?? o.user) === currentUserId;
+            if (storedEmail) return (o.user_email ?? o.customer_email ?? o.email) === storedEmail;
+            return false;
+          });
+          setOrders(filtered);
         } else {
-          // If not logged in or no id/email found — return empty list
-          setOrders([]);
-          setLoading(false);
-          return;
+          setOrders(cached);
+        }
+        return;
+      }
+
+      let data = Array.isArray(payload?.orders) ? payload.orders : [];
+
+      // defensive client-side filter for users (server should already have done this)
+      if (!['admin','superadmin'].includes(type)) {
+        if (currentUserId) {
+          data = data.filter((o: any) => (o.user_id ?? o.userId ?? o.user) === currentUserId);
+        } else if (storedEmail) {
+          data = data.filter((o: any) => (o.user_email ?? o.customer_email ?? o.email) === storedEmail);
+        } else {
+          data = [];
         }
       }
 
-      // Order newest first
-      const { data, error } = await query.order('created_at', { ascending: false });
+      const normalized = (data || []).map((o: any) => ({
+        ...o,
+        id: o.id ?? o.order_number ?? o.public_token ?? o.orderId,
+        created_at: o.created_at ?? o.orderDate ?? o.createdAt,
+        items: typeof o.items === 'string' ? (() => { try { return JSON.parse(o.items); } catch { return []; } })() : (o.items || []),
+        userId: o.user_id ?? o.userId ?? o.user,
+      }));
 
-      if (error) {
-        console.error('Error fetching orders from Supabase:', error);
-        setOrders([]);
-      } else {
-        // normalize some field names to match your UI expectations
-        const normalized = (data || []).map((o: any) => ({
-          ...o,
-          id: o.id ?? o.order_number ?? o.public_token ?? o.orderId,
-          created_at: o.created_at ?? o.orderDate ?? o.createdAt,
-          // items might be JSON string in some setups
-          items: typeof o.items === 'string' ? (() => {
-            try { return JSON.parse(o.items); } catch { return []; }
-          })() : (o.items || []),
-          // unify user fields
-          userId: o.user_id ?? o.userId ?? o.user,
-        }));
-        setOrders(normalized);
-      }
+      setOrders(normalized);
+      try { localStorage.setItem('allOrders', JSON.stringify(normalized)); } catch (e) {}
     } catch (err) {
-      console.error('Exception loading orders from Supabase:', err);
-      setOrders([]);
+      console.error('Exception loading orders via server route:', err);
+      setOrders(JSON.parse(localStorage.getItem('allOrders') || '[]'));
     } finally {
       setLoading(false);
     }
   };
 
-  // ---------- Load stats ----------
+
+
+
+
+
+// --- loader for restaurant phone number ---
+const loadRestaurantPhone = async () => {
+  try {
+    // Try reading from public table 'restaurant_info' (adjust column name if needed)
+    const { data, error } = await supabase
+      .from('restaurant_info')
+      .select('phone')
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Could not fetch restaurant phone from Supabase:', error);
+      return;
+    }
+    // data may be { phone: "..."} or null
+    const phone = data?.phone ?? null;
+    if (phone) setRestaurantPhone(String(phone));
+  } catch (err) {
+    console.error('Exception fetching restaurant phone:', err);
+  }
+};
+
+
+
+
+  // ---------- loadStats (server-backed) ----------
   const loadStats = async () => {
     try {
-      // total orders excluding cancelled
-      const totalResp = await supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .neq('status', 'cancelled');
-      const cancelledResp = await supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'cancelled');
-      const activeResp = await supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .not('status', 'in', ['completed', 'cancelled']);
+      const type = localStorage.getItem('userType') || 'user';
+      const currentUserId = localStorage.getItem('userId') || '';
+      const storedEmail = localStorage.getItem('userEmail') || '';
 
-      const totalsRows = await supabase.from('orders').select('total, status');
+      const params = new URLSearchParams();
+      params.set('role', type);
+      if (currentUserId) params.set('userId', currentUserId);
+      if (storedEmail) params.set('email', storedEmail);
 
-      const totalCount = totalResp.count || 0;
-      const cancelledCount = cancelledResp.count || 0;
-      const activeCount = activeResp.count || 0;
-      const totalRevenueNum = Array.isArray(totalsRows.data)
-        ? totalsRows.data.filter((r: any) => (r.status || '') !== 'cancelled').reduce((s: number, r: any) => s + (Number(r.total) || 0), 0)
-        : 0;
+      // include auth token in Authorization header so server can verify user identity
+      const authToken = localStorage.getItem('authToken') || localStorage.getItem('supabase.auth.token') || '';
+      const res = await fetch(`/api/orders/list?${params.toString()}`, {
+        headers: {
+          Authorization: authToken ? `Bearer ${authToken}` : ''
+        }
+      });
+
+      const txt = await res.text().catch(() => '');
+      let payload: any = null;
+      try { payload = txt ? JSON.parse(txt) : null; } catch (e) { payload = { raw: txt }; }
+
+      let ordersData: any[] = Array.isArray(payload?.orders) ? payload.orders : [];
+
+      // fallback to lightweight supabase fetch if server route not available
+      if (!Array.isArray(ordersData) || ordersData.length === 0) {
+        try {
+          const { data: altData, error: altErr } = await supabase.from('orders').select('total, status');
+          if (!altErr && Array.isArray(altData)) ordersData = altData;
+        } catch (e) {
+          console.warn('fallback supabase stats fetch failed', e);
+        }
+      }
+
+      const totalCount = ordersData.filter((r:any) => (r.status || '') !== 'cancelled').length;
+      const cancelledCount = ordersData.filter((r:any) => (r.status || '') === 'cancelled').length;
+      const activeCount = ordersData.filter((r:any) => !['completed','cancelled'].includes((r.status || '').toString())).length;
+      const totalRevenueNum = ordersData.filter((r:any) => (r.status || '') !== 'cancelled').reduce((s:number, r:any) => s + (Number(r.total) || 0), 0);
 
       setTotalOrders(totalCount);
       setCancelledOrders(cancelledCount);
       setActiveOrders(activeCount);
       setTotalRevenue(totalRevenueNum);
     } catch (err) {
-      console.error('Error loading stats from Supabase:', err);
+      console.error('Error computing stats via server route:', err);
     }
   };
 
-  // ---------- Cancel order (updates DB only) ----------
+  // ---------- handleCancelOrder (server-backed) ----------
   const handleCancelOrder = async (orderId: string) => {
     if (processingOrderId) return;
     setProcessingOrderId(orderId);
 
     try {
-      // Try direct update via Supabase client
-      const { error: updateErr } = await supabase
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('id', orderId);
-
-      if (!updateErr) {
-        showSuccessToast('Order cancelled successfully.');
-        await loadOrders();
-        await loadStats();
+      // Ensure token exists
+      const authToken = localStorage.getItem('authToken') || '';
+      if (!authToken) {
+        showErrorToast('Not authenticated. Please log in again.');
         return;
       }
 
-      console.warn('Direct update failed:', updateErr);
-      // fallback: call serverless function if you have one
-      const authToken = localStorage.getItem('authToken');
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/order-service`, {
-        method: 'POST',
+      // Call secure server route that validates token + enforces ownership
+      const res = await fetch('/api/orders/update', {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+          Authorization: `Bearer ${authToken}`
         },
-        body: JSON.stringify({
-          action: 'updateOrderStatus',
-          orderId,
-          status: 'cancelled'
-        })
+        body: JSON.stringify({ id: orderId, updates: { status: 'cancelled' } }),
       });
 
-      if (!response.ok) {
-        const txt = await response.text().catch(() => '');
-        console.warn('Edge function update returned non-OK:', response.status, txt);
-        showErrorToast('Failed to cancel order (network).');
+      const text = await res.text().catch(() => '');
+      let body: any = null;
+      try { body = text ? JSON.parse(text) : null; } catch(e) { body = { raw: text }; }
+
+      if (!res.ok || body?.success === false) {
+        console.warn('Server cancel failed:', res.status, body);
+        showErrorToast(body?.error || 'Failed to cancel order.');
         return;
       }
 
-      const data = await response.json().catch(() => null);
-      if (data && data.success) {
-        showSuccessToast('Order cancelled successfully (Edge Function).');
-        await loadOrders();
-        await loadStats();
-        return;
-      }
+      showSuccessToast('Order cancelled successfully.');
+      await loadOrders();
+      await loadStats();
+      // fetch restaurant phone once on mount
 
-      console.warn('Edge function update failed:', data?.error || data);
-      showErrorToast('Unable to cancel order. Please contact support.');
-    } catch (error) {
-      console.error('Error cancelling order:', error);
+    } catch (err) {
+      console.error('Error cancelling order via server route:', err);
       showErrorToast('Error cancelling order. Please try again.');
     } finally {
       setProcessingOrderId(null);
@@ -296,16 +347,53 @@ export default function OrdersPage() {
 
   // ---------- useEffect: initial load + realtime subscription + polling fallback ----------
   useEffect(() => {
-    const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    const type = localStorage.getItem('userType') || 'user';
-    const email = localStorage.getItem('userEmail') || null;
 
+
+    const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
+
+    // sync session from supabase client and ensure authToken + userId are set
     setIsLoggedIn(loggedIn);
-    setUserType(type);
-    setUserEmail(email);
 
     (async () => {
-      await loadLoggedInUserName();
+      try {
+        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+        if (!sessionErr && sessionData?.session) {
+          const token = sessionData.session.access_token;
+          const uid = sessionData.session.user?.id;
+          const userEmailFromSession = sessionData.session.user?.email || null;
+
+          if (token) localStorage.setItem('authToken', token);
+          if (uid) localStorage.setItem('userId', uid);
+          if (userEmailFromSession) localStorage.setItem('userEmail', userEmailFromSession);
+
+          // attempt to load role for UI (best-effort; server enforces access)
+          try {
+            const { data: userRow, error: uErr } = await supabase
+              .from('users')
+              .select('role')
+              .eq('id', uid)
+              .maybeSingle();
+            if (!uErr && userRow?.role) {
+              localStorage.setItem('userType', userRow.role);
+              setUserType(userRow.role);
+            } else {
+              // fallback to whatever is stored
+              setUserType(localStorage.getItem('userType') || 'user');
+            }
+          } catch (e) {
+            setUserType(localStorage.getItem('userType') || 'user');
+          }
+          setUserEmail(localStorage.getItem('userEmail') || userEmailFromSession);
+        } else {
+          // no session — rely on localStorage values (if any)
+          setUserType(localStorage.getItem('userType') || 'user');
+          setUserEmail(localStorage.getItem('userEmail') || null);
+        }
+      } catch (e) {
+        console.warn('Session sync failed', e);
+        setUserType(localStorage.getItem('userType') || 'user');
+        setUserEmail(localStorage.getItem('userEmail') || null);
+      }
     })();
 
     if (!loggedIn) {
@@ -316,29 +404,49 @@ export default function OrdersPage() {
     // initial load
     loadOrders();
     loadStats();
-
+loadRestaurantPhone().catch(() => {});
     // Try realtime subscription (Supabase v2 .channel)
     try {
       if ((supabase as any).channel) {
         const channel = (supabase as any)
           .channel('public:orders')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload: any) => {
+            // secure realtime handler: ignore events not belonging to current user
+            const currentUserId = localStorage.getItem('userId') || null;
             const event = payload.event;
             const newRow = payload.new ?? payload.record ?? null;
             const oldRow = payload.old ?? null;
 
+            // If no logged-in user id, ignore realtime updates
+            if (!currentUserId) return;
+
+            // Only process events that belong to the current user
+            const belongsToCurrentUser = (row: any) => {
+              if (!row) return false;
+              // prefer user_id column, fallback to email or other user key
+              const rowUserId = row.user_id ?? row.userId ?? row.user;
+              const rowEmail = row.user_email ?? row.customer_email ?? row.email;
+              if (rowUserId) return (rowUserId === currentUserId);
+              const storedEmail = localStorage.getItem('userEmail') || null;
+              if (rowEmail && storedEmail) return (rowEmail === storedEmail);
+              return false;
+            };
+
             if (event === 'INSERT' && newRow) {
+              if (!belongsToCurrentUser(newRow)) return; // ignore others' inserts
               setOrders(prev => [newRow, ...prev].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()));
               loadStats().catch(() => {});
             } else if (event === 'UPDATE' && newRow) {
+              if (!belongsToCurrentUser(newRow)) return; // ignore updates for other users
               setOrders(prev => prev.map(o => (o.id === newRow.id ? newRow : o)));
               loadStats().catch(() => {});
             } else if (event === 'DELETE') {
               const deletedId = oldRow?.id ?? payload?.record?.id ?? null;
-              if (deletedId) {
-                setOrders(prev => prev.filter(o => o.id !== deletedId));
-                loadStats().catch(() => {});
-              }
+              if (!deletedId) return;
+              // if we have oldRow, check ownership; otherwise check previous cache
+              if (oldRow && !belongsToCurrentUser(oldRow)) return;
+              setOrders(prev => prev.filter(o => o.id !== deletedId));
+              loadStats().catch(() => {});
             }
           })
           .subscribe();
@@ -348,22 +456,38 @@ export default function OrdersPage() {
         const sub = (supabase as any)
           .from('orders')
           .on('*', (payload: any) => {
+            // secure realtime handler: ignore events not belonging to current user
+            const currentUserId = localStorage.getItem('userId') || null;
             const event = payload.event || payload.eventType;
             const newRow = payload.new ?? payload.record ?? null;
             const oldRow = payload.old ?? null;
 
+            if (!currentUserId) return;
+
+            const belongsToCurrentUser = (row: any) => {
+              if (!row) return false;
+              const rowUserId = row.user_id ?? row.userId ?? row.user;
+              const rowEmail = row.user_email ?? row.customer_email ?? row.email;
+              if (rowUserId) return (rowUserId === currentUserId);
+              const storedEmail = localStorage.getItem('userEmail') || null;
+              if (rowEmail && storedEmail) return (rowEmail === storedEmail);
+              return false;
+            };
+
             if (event === 'INSERT' && newRow) {
+              if (!belongsToCurrentUser(newRow)) return;
               setOrders(prev => [newRow, ...prev].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()));
               loadStats().catch(() => {});
             } else if (event === 'UPDATE' && newRow) {
+              if (!belongsToCurrentUser(newRow)) return;
               setOrders(prev => prev.map(o => (o.id === newRow.id ? newRow : o)));
               loadStats().catch(() => {});
             } else if (event === 'DELETE') {
               const deletedId = oldRow?.id ?? payload?.record?.id ?? null;
-              if (deletedId) {
-                setOrders(prev => prev.filter(o => o.id !== deletedId));
-                loadStats().catch(() => {});
-              }
+              if (!deletedId) return;
+              if (oldRow && !belongsToCurrentUser(oldRow)) return;
+              setOrders(prev => prev.filter(o => o.id !== deletedId));
+              loadStats().catch(() => {});
             }
           })
           .subscribe();
@@ -522,7 +646,7 @@ export default function OrdersPage() {
                           </button>
                         )}
 
-                        <a href="tel:+977-61-523456" className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer">
+                        <a href={restaurantPhone ? `tel:${restaurantPhone}` : 'tel:+977-61-523456'} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer">
                           <i className="ri-phone-line"></i>
                         </a>
                       </div>
@@ -596,10 +720,23 @@ export default function OrdersPage() {
                   <div><h3 className="font-semibold">Browse Menu</h3><p className="text-sm text-gray-600">Explore our dishes</p></div>
                 </Link>
 
-                <a href="tel:+977-61-523456" className="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-200 transition-colors cursor-pointer">
-                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><i className="ri-phone-line text-green-600"></i></div>
-                  <div><h3 className="font-semibold">Call Restaurant</h3><p className="text-sm text-gray-600">Get help or support</p></div>
-                </a>
+<a
+  href={restaurantPhone ? `tel:${restaurantPhone}` : 'tel:+977-61-523456'}
+  className="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-200 transition-colors cursor-pointer"
+  title={restaurantPhone ? `Call ${restaurantPhone}` : 'Call restaurant'}
+>
+  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+    <i className="ri-phone-line text-green-600"></i>
+  </div>
+  <div>
+    <h3 className="font-semibold">Call Restaurant</h3>
+    <p className="text-sm text-gray-600">{restaurantPhone ?? '+977-61-523456'}</p>
+  </div>
+</a>
+
+
+
+
 
                 <Link href="/contact" className="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-200 transition-colors cursor-pointer">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><i className="ri-message-line text-blue-600"></i></div>

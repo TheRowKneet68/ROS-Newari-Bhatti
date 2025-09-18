@@ -11,7 +11,7 @@ function MenuContent() {
   const searchParams = useSearchParams();
   const categoryFromUrl = searchParams?.get('category') || '';
   
-  const [selectedCategory, setSelectedCategory] = useState(categoryFromUrl || 'all');
+  const [selectedCategory, setSelectedCategory] = useState(String(categoryFromUrl || 'all'));
   const [searchTerm, setSearchTerm] = useState('');
   const [cartItems, setCartItems] = useState<{[key: number]: number}>({});
   const [menuItems, setMenuItems] = useState<any[]>([]);
@@ -23,6 +23,14 @@ function MenuContent() {
     <div className="flex flex-col items-center">
       <div className="w-16 h-16 bg-gray-200 rounded-full mb-3" />
       <div className="w-24 h-4 bg-gray-200 rounded-full" />
+
+
+
+
+
+
+
+
     </div>
   );
 
@@ -93,7 +101,7 @@ function MenuContent() {
 
       const data = await response.json();
       if (data.success) {
-        const allCategory = { id: 'all', name: 'All Items', icon: 'ri-grid-line', slug: 'all' };
+        const allCategory = { id: 'all', name: 'All Items'};
         setCategories([allCategory, ...data.categories]);
         setMenuItems(data.menuItems);
 
@@ -106,16 +114,19 @@ function MenuContent() {
   };
 
   // ---------- Helpers ----------
-  const filteredItems = menuItems.filter(item => {
-    const matchesCategory =
-      selectedCategory === 'all' ||
-      item.category_id === selectedCategory ||
-      item.category?.slug === selectedCategory;
-    const matchesSearch =
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.description || '').toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+const filteredItems = menuItems.filter(item => {
+  const itemCatId = String(item.category_id ?? item.category?.id ?? '');
+  const matchesCategory =
+    selectedCategory === 'all' ||
+    itemCatId === String(selectedCategory) ||
+    (item.category?.slug && item.category.slug === selectedCategory);
+
+  const matchesSearch =
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+  return matchesCategory && matchesSearch;
+});
 
   const addToCart = (itemId: number) => {
     const newCart = { ...cartItems, [itemId]: (cartItems[itemId] || 0) + 1 };
@@ -211,7 +222,7 @@ function MenuContent() {
                     }`}
                     type="button"
                   >
-                    <div className={`w-15 h-8 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ${isActive ? 'ring-2 ring-white' : ''}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ${isActive ? 'ring-2 ring-white' : ''}`}>
                       {src ? (
                         <img
                           src={src}
@@ -227,9 +238,12 @@ function MenuContent() {
                     <span className={`font-medium text-sm ${isActive ? 'text-white' : 'text-gray-800'}`}>
                       {category.name}
                     </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${isActive ? 'bg-orange-700/30 text-white' : 'bg-white/60 text-gray-600'}`}>
-                      {category.count ?? menuItems.filter((it: any) => it.category_id === category.id).length}
-                    </span>
+<span className={`text-xs px-2 py-0.5 rounded-full ${isActive ? 'bg-orange-700/30 text-white' : 'bg-white/60 text-gray-600'}`}>
+  {category.id === 'all'
+    ? menuItems.length
+    : (category.count ?? menuItems.filter((it: any) => String(it.category_id) === String(category.id)).length)}
+</span>
+
                   </button>
                 );
               })}

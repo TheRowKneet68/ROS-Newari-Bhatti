@@ -9,6 +9,9 @@ import OrderModal from './OrderModal';
 import { createClient } from '@supabase/supabase-js';
 import { useRef } from 'react';
 
+
+
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -29,6 +32,10 @@ export default function DashboardPage() {
   const BUCKETNAME = 'menu-images';
 
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
+
+  const [error, setError] = useState<string | null>(null);
+
+
 
   const lastOrderCountRef = useRef<number | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
@@ -66,7 +73,7 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [showOwnerPanel, setShowOwnerPanel] = useState(false);
   const [showRestaurantInfoModal, setShowRestaurantInfoModal] = useState(false);
-  const [showAdminModal, setShowAdminModal] = useState(false);
+
   const [reviews, setReviews] = useState<any[]>([]);
   const [admins, setAdmins] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -77,7 +84,20 @@ export default function DashboardPage() {
   const [showEditItemModal, setShowEditItemModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+
+
+
+
+// Admin management state & UI flags
+const [loadingAdmins, setLoadingAdmins] = useState<boolean>(true);
+const [operationError, setOperationError] = useState<string | null>(null);
+const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+const [editingAdmin, setEditingAdmin] = useState<any | null>(null);
+
+
+
+
 
 
 // image upload states
@@ -191,10 +211,17 @@ const loadUserQuestions = async () => {
   }
 };
 
+// whenever editingAdmin changes or modal opens, populate (or clear) the form
 useEffect(() => {
   loadUserQuestions();
+  (async () => {
+    try {
+      await fetchAdmins();
+    } catch (err) {
+      console.error("useEffect fetchAdmins failed:", err);
+    }
+  })();
 }, []);
-
 
 
 
@@ -1154,10 +1181,42 @@ const loadRestaurantInfo = async () => {
   }
 };
 
-  const loadAdmins = () => {
-    const savedAdmins = JSON.parse(localStorage.getItem('adminUsers') || '[]');
-    setAdmins(savedAdmins);
-  };
+
+
+
+
+
+// Load admins from server-side API (returns users with role/admin user_type)
+const loadAdmins = async () => {
+  try {
+    // Defensive fetch: server should return { success: true, admins: [...] }
+    const res = await fetch('/api/admins/list', { method: 'GET', headers: { 'Content-Type': 'application/json' }});
+    const text = await res.text().catch(() => '');
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok) {
+      console.warn('loadAdmins: server returned non-OK', res.status, payload);
+      // if API returns admins under different shape, try to handle common ones
+      if (payload?.admins) { setAdmins(payload.admins); return; }
+      setAdmins([]);
+      return;
+    }
+
+    // expected shape: { success: true, admins: [...] } or { admins: [...] }
+    const adminsList = Array.isArray(payload?.admins) ? payload.admins : (Array.isArray(payload) ? payload : []);
+    setAdmins(adminsList);
+  } catch (err) {
+    console.error('loadAdmins error:', err);
+    setAdmins([]);
+  }
+};
+
+
+
+
+
+
 
   const showSuccessToast = (message: string) => {
     const successToast = document.createElement('div');
@@ -1426,82 +1485,86 @@ const handleEditMenuItem = async (itemData: any) => {
     setLoading(false);
   };
 
-// Replace your existing updateRestaurantInfo with this robust implementation
+
+  
+
+
+
+
+
+
+
+
+// replace the old updateRestaurantInfo with this function (paste entire function)
 const updateRestaurantInfo = async (info: any) => {
-  // local saving state (avoid clobbering other global loading)
   try {
-    // optional: if you maintain a saving state hook in file, use it instead
+    // optional UI saving indicator (if you have setSaving)
     if (typeof setSaving === 'function') setSaving(true);
 
-    // normalize payload: remove undefined values
+    // Normalize payload: remove undefined keys
     const payload: Record<string, any> = {};
     Object.entries(info || {}).forEach(([k, v]) => {
       if (v !== undefined) payload[k] = v;
     });
 
-    // If there is an id provided, try upsert (so we update existing row).
-    // If id is undefined/null, insert a new row.
-    let resultData = null;
-    if (payload.id !== undefined && payload.id !== null && payload.id !== '') {
-      // ensure id type matches your DB pk type (int or uuid)
-      // If your id is serial/int but the incoming id is string, coerce:
-      // payload.id = Number(payload.id) // uncomment if needed
+    // Call server-side route that uses SUPABASE_SERVICE_ROLE_KEY to bypass RLS
+    // The server route will perform the upsert/update/insert safely.
+    const res = await fetch('/api/restaurant/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: payload.id ?? null,
+        updates: payload
+      })
+    });
 
-      const { data, error } = await supabase
-        .from('restaurant_info')
-        .upsert(payload, { onConflict: 'id', returning: 'representation' });
+    const txt = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
 
-      if (error) {
-        console.error('Supabase upsert error (updateRestaurantInfo):', error);
-        // Common error: "new row violates row-level security policy" => RLS problem
-        // Show helpful message for debugging:
-        alert(`Save failed: ${error.message || JSON.stringify(error)}`);
-        return false;
-      }
-
-      resultData = Array.isArray(data) ? data[0] : data;
-    } else {
-      // Insert new row (no id provided)
-      const { data, error } = await supabase
-        .from('restaurant_info')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Supabase insert error (updateRestaurantInfo):', error);
-        alert(`Insert failed: ${error.message || JSON.stringify(error)}`);
-        return false;
-      }
-
-      resultData = data;
+    if (!res.ok || body?.success === false) {
+      console.error('Server returned error for /api/restaurant/update:', res.status, body);
+      const msg = body?.error || body?.message || `Save failed (status ${res.status})`;
+      // show error to user
+      if (typeof showErrorToast === 'function') showErrorToast(msg);
+      else alert(msg);
+      return false;
     }
 
-    // Update React state (replace variable names below if you use different names)
+    // success — server returns the updated restaurant row under body.restaurant (or body.data)
+    const updated = body?.restaurant ?? body?.data ?? body?.result ?? null;
+
+    // Update UI state
     if (typeof setRestaurantInfo === 'function') {
-      setRestaurantInfo(resultData);
-    } else {
-      console.warn('setRestaurantInfo not found; update aborted for UI state');
+      setRestaurantInfo(updated);
+      try { await loadRestaurantInfo(); } catch (e) { console.warn('loadRestaurantInfo after save failed', e); }
     }
 
-    // optional cache to localStorage
-    try {
-      localStorage.setItem('restaurant_info', JSON.stringify(resultData));
-    } catch (e) { /* ignore */ }
+    try { localStorage.setItem('restaurantInfo', JSON.stringify(updated)); } catch (e) {}
 
-    // success feedback (if you have UI to show)
     if (typeof showSuccessToast === 'function') showSuccessToast('Restaurant info saved');
-    else console.info('Restaurant info saved', resultData);
+    else console.info('Restaurant info saved', updated);
 
     return true;
   } catch (err: any) {
-    console.error('Unexpected error in updateRestaurantInfo:', err);
-    alert('Unexpected error while saving. See console for details.');
+    console.error('Unexpected error in updateRestaurantInfo (client):', err);
+    if (typeof showErrorToast === 'function') showErrorToast('Unexpected error while saving. See console.');
+    else alert('Unexpected error while saving. See console.');
     return false;
   } finally {
     if (typeof setSaving === 'function') setSaving(false);
   }
 };
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1540,7 +1603,6 @@ const updateRestaurantInfo = async (info: any) => {
 
 
 
-
 const deleteReview = async (reviewId: number) => {
   // if (!confirm('Are you sure you want to delete this review?')) return;
 
@@ -1555,29 +1617,38 @@ const deleteReview = async (reviewId: number) => {
       body: JSON.stringify({ reviewId: Number(reviewId) })
     });
 
+    // read raw text so we can log or attempt JSON parse for both ok and non-ok
+    const raw = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = { raw }; }
+
     if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.warn('Server delete returned non-OK:', res.status, txt);
-      showErrorToast('Failed to delete review (network).');
+      console.error('[deleteReview] server returned non-OK', res.status, body);
+      // show server-provided error if any, otherwise a generic message
+      const serverMsg = body?.error || body?.message || (body?.raw && String(body.raw)) || 'Unknown server error';
+      showErrorToast('Failed to delete review: ' + serverMsg);
+      setReviews(prev); // revert optimistic update
+      return;
+    }
+
+    // res.ok
+    if (!body || body.success === false) {
+      console.warn('[deleteReview] delete responded but reported failure:', body);
+      const serverMsg = body?.error || 'Delete failed';
+      showErrorToast('Failed to delete review: ' + serverMsg);
       setReviews(prev); // revert
       return;
     }
 
-    const data = await res.json().catch(() => null);
-    if (!data || !data.success) {
-      console.warn('Server delete error:', data);
-      showErrorToast('Failed to delete review. Please try again.');
-      setReviews(prev); // revert
-      return;
-    }
-
+    console.log('[deleteReview] success:', body);
     showSuccessToast('Review deleted successfully!');
-    // optional: refresh from server to be sure
+    // optional: refresh list from server
     await loadReviews();
   } catch (err) {
-    console.log('Error deleting review:', err);
-    showErrorToast('Error deleting review. Please try again.');
-    setReviews(prev); // revert
+    // network-level or unexpected JS error
+    console.error('[deleteReview] network / unexpected error:', err);
+    showErrorToast('Failed to delete review (network). See console for details.');
+    setReviews(prev); // revert optimistic update
   }
 };
 
@@ -1587,26 +1658,240 @@ const deleteReview = async (reviewId: number) => {
 
 
 
-  const addAdmin = (adminData: any) => {
-    const newAdmin = {
-      id: Date.now(),
-      ...adminData,
-      role: 'admin',
-      addedBy: userType,
-      addedDate: new Date().toISOString()
+// Add a new admin (calls server-side API)
+const addAdmin = async (adminData: { first_name?: string; last_name?: string; name?: string; email: string; password?: string; phone?: string; role?: string }) => {
+  try {
+    setLoading(true);
+    // prepare payload: support both name and first/last split
+    const payload: any = {
+      email: adminData.email,
+      password: adminData.password || (Math.random().toString(36).slice(2, 10) + 'A1!'),
+      first_name: adminData.first_name ?? (adminData.name ? adminData.name.split(' ')[0] : null),
+      last_name: adminData.last_name ?? (adminData.name ? adminData.name.split(' ').slice(1).join(' ') : null),
+      phone: adminData.phone ?? null,
+      role: adminData.role ?? 'admin',
+      user_type: 'admin'
     };
-    const updatedAdmins = [...admins, newAdmin];
-    setAdmins(updatedAdmins);
-    localStorage.setItem('adminUsers', JSON.stringify(updatedAdmins));
-  };
 
-  const removeAdmin = (adminId: number) => {
-    if (confirm('Are you sure you want to remove this admin?')) {
-      const updatedAdmins = admins.filter(admin => admin.id !== adminId);
-      setAdmins(updatedAdmins);
-      localStorage.setItem('adminUsers', JSON.stringify(updatedAdmins));
+    const res = await fetch('/api/admins/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text().catch(() => '');
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+
+    if (!res.ok || !data || data.success === false) {
+      console.error('Failed to add admin:', res.status, data);
+      showErrorToast('Failed to add admin: ' + (data?.error ?? 'Unknown error'));
+      return false;
     }
-  };
+
+    // refresh list
+    await loadAdmins();
+    showSuccessToast('Admin added successfully');
+    return true;
+  } catch (err) {
+    console.error('addAdmin error:', err);
+    showErrorToast('Error adding admin. See console.');
+    return false;
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+const fetchAdmins = async () => {
+  setLoadingAdmins(true);
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/list", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const text = await res.text();
+    let payload: any = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch (e) {
+      console.warn("fetchAdmins: response was not valid JSON", text);
+      payload = null;
+    }
+
+    if (!res.ok) {
+      console.error("fetchAdmins non-OK", res.status, payload);
+      setAdmins([]);
+      return;
+    }
+
+    setAdmins(Array.isArray(payload?.admins) ? payload.admins : []);
+  } catch (err) {
+    console.error("fetchAdmins exception:", err);
+    setOperationError(err?.message ?? "Failed to load admins");
+    setAdmins([]);
+  } finally {
+    setLoadingAdmins(false);
+  }
+};
+
+
+
+
+
+// Remove admin (calls POST /api/admins/delete with { id })
+const removeAdmin = async (adminId: string) => {
+  if (!confirm("Remove this admin? This action cannot be undone.")) return;
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: adminId }),
+    });
+    const text = await res.text();
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok || payload?.success === false) {
+      console.error("removeAdmin failed:", res.status, payload);
+      setOperationError(payload?.error ?? `Failed to remove admin (${res.status})`);
+      // refresh anyway to avoid UI drift
+      await fetchAdmins();
+      return;
+    }
+
+    // optimistic update
+    setAdmins(prev => prev.filter(a => String(a.id) !== String(adminId)));
+    // ensure fresh
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("removeAdmin error:", err);
+    setOperationError(err?.message ?? "Failed to remove admin");
+    await fetchAdmins();
+  }
+};
+
+
+
+
+
+
+
+
+const handleAdminSave = async (payload: any) => {
+  setOperationError(null);
+  try {
+    // Ensure address is normalized...
+    if (!payload.address) {
+      const street = (payload.address_street ?? "").toString().trim();
+      const city = (payload.address_city ?? "").toString().trim();
+      const state = (payload.address_state ?? "").toString().trim();
+      const zip = (payload.address_zip_code ?? payload.address_zip ?? "").toString().trim();
+
+      if (street || city || state || zip) {
+        payload.address = { street: street || null, city: city || null, state: state || null, zip: zip || null };
+      } else {
+        payload.address = null;
+      }
+
+      delete payload.address_street;
+      delete payload.address_city;
+      delete payload.address_state;
+      delete payload.address_zip_code;
+    }
+
+    // 🔑 Add this block: enforce role based on current logged-in user
+    const currentUserType = localStorage.getItem("userType");
+    if (currentUserType === "superadmin") {
+      payload.role = "admin";
+      payload.user_type = "admin";
+    } else {
+      payload.role = "user";
+      payload.user_type = "user";
+    }
+
+    const url = payload.id ? "/api/admins/edit" : "/api/admins/add";
+    const method: "POST" | "PUT" = payload.id ? "PUT" : "POST";
+
+    console.debug("handleAdminSave outgoing payload:", JSON.stringify(payload));
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { throw new Error("Server returned non-JSON: " + (text?.slice(0,200) || "<empty>")); }
+
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+
+    showSuccessToast(payload.id ? "Admin updated" : "Admin added");
+    setShowAdminModal(false);
+    setEditingAdmin(null);
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("handleAdminSave error:", err);
+    const msg = err?.message ?? "Failed to save admin";
+    setOperationError(msg);
+    showErrorToast(msg);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   const toggleFeaturedReview = async (reviewId: number, currentFeatured: boolean) => {
     try {
@@ -3332,45 +3617,93 @@ const deleteReview = async (reviewId: number) => {
                     </button>
                   </div>
                   <div className="space-y-2 text-sm">
-                    <p><strong>Name:</strong> {restaurantInfo.name}</p>
-                    <p><strong>Phone:</strong> {restaurantInfo.phone}</p>
-                    <p><strong>Email:</strong> {restaurantInfo.email}</p>
-                    <p><strong>Address:</strong> {restaurantInfo.address}</p>
+
+                    
+                    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
+                    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
+                    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
+                    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
+                  
+                  
+                  
                   </div>
                 </div>
 
-                {/* Admin Management */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">Admin Management</h3>
-                    <button
-                      onClick={() => setShowAdminModal(true)}
-                      className="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 cursor-pointer text-sm"
-                    >
-                      Add Admin
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {admins.length === 0 ? (
-                      <p className="text-gray-500 text-sm">No admins added yet</p>
-                    ) : (
-                      admins.map((admin) => (
-                        <div key={admin.id} className="flex justify-between items-center bg-white p-3 rounded-lg">
-                          <div>
-                            <p className="font-medium text-sm">{admin.name}</p>
-                            <p className="text-xs text-gray-500">{admin.email}</p>
-                          </div>
-                          <button
-                            onClick={() => removeAdmin(admin.id)}
-                            className="text-red-600 hover:text-red-700 cursor-pointer"
-                          >
-                            <i className="ri-delete-bin-line"></i>
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+
+
+
+
+
+
+
+
+
+
+
+
+{/* Admin Management */}
+<div className="bg-gray-50 rounded-lg p-4">
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-lg font-semibold">Admin Management</h3>
+    <button
+      onClick={() => { setEditingAdmin(null); setShowAdminModal(true); }}
+      className="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 cursor-pointer text-sm"
+    >
+      Add Admin
+    </button>
+  </div>
+
+  {operationError && (
+    <div className="mb-3 text-sm text-red-600">{operationError}</div>
+  )}
+
+  <div className="space-y-2">
+    {loadingAdmins ? (
+      <p className="text-gray-500 text-sm">Loading admins...</p>
+    ) : admins.length === 0 ? (
+      <p className="text-gray-500 text-sm">No admins added yet</p>
+    ) : (
+      admins.map((admin: any) => (
+        <div key={admin.id} className="flex justify-between items-center bg-white p-3 rounded-lg">
+          <div>
+            <p className="font-medium text-sm">
+              {admin.first_name || admin.name || `${admin.first_name ?? ""} ${admin.last_name ?? ""}`.trim() || "Admin"}
+            </p>
+            <p className="text-xs text-gray-500">{admin.email}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setEditingAdmin(admin); setShowAdminModal(true); }}
+              className="text-indigo-600 hover:text-indigo-700 cursor-pointer text-sm"
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={() => removeAdmin(admin.id)}
+              className="text-red-600 hover:text-red-700 cursor-pointer"
+            >
+              <i className="ri-delete-bin-line"></i>
+            </button>
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
 
                 {/* Review Management Summary */}
                 <div className="bg-gray-50 rounded-lg p-4">
@@ -3393,7 +3726,7 @@ const deleteReview = async (reviewId: number) => {
       )}
 
       {/* Restaurant Info Modal */}
-      {showRestaurantInfoModal && (
+      {showRestaurantInfoModal && restaurantInfo ? (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
@@ -3409,20 +3742,24 @@ const deleteReview = async (reviewId: number) => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target as HTMLFormElement);
-              updateRestaurantInfo({
-                name: formData.get('name') as string,
-                phone: formData.get('phone') as string,
-                email: formData.get('email') as string,
-                address: formData.get('address') as string,
-                coordinates: formData.get('coordinates') as string
-              });
+// add id from restaurantInfo so function updates instead of inserting
+updateRestaurantInfo({
+  id: restaurantInfo?.id ?? null,
+  name: String(formData.get('name') ?? ''),
+  phone: String(formData.get('phone') ?? ''),
+  email: String(formData.get('email') ?? ''),
+  address: String(formData.get('address') ?? ''),
+  coordinates: String(formData.get('coordinates') ?? '')
+});
+
+
             }} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Restaurant Name</label>
                 <input
                   type="text"
                   name="name"
-                  defaultValue={restaurantInfo.name}
+                  defaultValue={restaurantInfo?.name ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3432,17 +3769,18 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="tel"
                   name="phone"
-                  defaultValue={restaurantInfo.phone}
+                  defaultValue={restaurantInfo?.phone ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
                   name="email"
-                  defaultValue={restaurantInfo.email}
+                  defaultValue={restaurantInfo?.email ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3452,7 +3790,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="address"
-                  defaultValue={restaurantInfo.address}
+                  defaultValue={restaurantInfo?.address ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -3462,7 +3800,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="coordinates"
-                  defaultValue={restaurantInfo.coordinates}
+                  defaultValue={restaurantInfo?.coordinates ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   placeholder="28.22886241546525, 83.99098268394296"
                   required
@@ -3486,78 +3824,255 @@ const deleteReview = async (reviewId: number) => {
             </form>
           </div>
         </div>
-      )}
+      ): null}
 
-      {/* Add Admin Modal */}
-      {showAdminModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold">Add New Admin</h3>
-              <button
-                onClick={() => setShowAdminModal(false)}
-                className="text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <i className="ri-close-line text-xl"></i>
-              </button>
-            </div>
 
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target as HTMLFormElement);
-              addAdmin({
-                name: formData.get('name') as string,
-                email: formData.get('email') as string,
-                password: formData.get('password') as string
-              });
-              setShowAdminModal(false);
-            }} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                <input
-                  type="password"
-                  name="password"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAdminModal(false)}
-                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  Add Admin
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+
+
+
+{/* Add Admin Modal */}
+{showAdminModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-semibold">Add New Admin</h3>
+        <button
+          onClick={() => setShowAdminModal(false)}
+          className="text-gray-400 hover:text-gray-600 cursor-pointer"
+        >
+          <i className="ri-close-line text-xl"></i>
+        </button>
+      </div>
+
+
+
+
+
+<form
+  onSubmit={async (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const fd = new FormData(form);
+
+      const first_name = (fd.get("first_name") as string || "").trim();
+      const last_name = (fd.get("last_name") as string || "").trim();
+      const email = (fd.get("email") as string || "").trim();
+      const password = (fd.get("password") as string || "").trim();
+      const phone = (fd.get("phone") as string || "").trim();
+      const role = (fd.get("role") as string || "").trim() || "admin";
+      const user_type = (fd.get("user_type") as string || "").trim() || role;
+
+      const address_street = (fd.get("address_street") as string || "").trim();
+      const address_city = (fd.get("address_city") as string || "").trim();
+      const address_state = (fd.get("address_state") as string || "").trim();
+      const address_zip_code = (fd.get("address_zip_code") as string || "").trim();
+
+      const isEdit = !!(editingAdmin && editingAdmin.id);
+      if (!email) { alert("Email is required."); return; }
+      if (!isEdit && !password) { alert("Password is required for new admin."); return; }
+
+      const payload: any = {
+        first_name: first_name || null,
+        last_name: last_name || null,
+        email,
+        phone: phone || null,
+        role,
+        user_type,
+        // include flat address fields; handleAdminSave will convert them
+        address_street: address_street || null,
+        address_city: address_city || null,
+        address_state: address_state || null,
+        address_zip_code: address_zip_code || null,
+      };
+
+      if (!isEdit) payload.password = password;
+      else {
+        payload.id = editingAdmin.id;
+        if (password) payload.password = password;
+      }
+
+      // hand-off to universal save (converts address -> address object)
+      await handleAdminSave(payload);
+
+      // UI cleanup (handleAdminSave already closes modal on success)
+    } catch (err: any) {
+      console.error("Admin add/edit submit error:", err);
+      setOperationError(err?.message ?? "Failed to save admin");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }}
+  className="space-y-4"
+>
+
+
+
+
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">First name</label>
+    <input
+      type="text"
+      name="first_name"
+      defaultValue={editingAdmin?.first_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ')[0] : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="First name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Last name</label>
+    <input
+      type="text"
+      name="last_name"
+      defaultValue={editingAdmin?.last_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ').slice(1).join(' ') : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="Last name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+    <input
+      type="email"
+      name="email"
+      defaultValue={editingAdmin?.email ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="email@example.com"
+      required
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Password {editingAdmin ? <span className="text-xs text-gray-500">(leave blank to keep)</span> : null}</label>
+    <input
+      type="password"
+      name="password"
+      defaultValue={''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder={editingAdmin ? 'Leave blank to keep current password' : 'Choose a strong password'}
+      // do not set required here; we validate above based on isEdit
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+    <input
+      type="tel"
+      name="phone"
+      defaultValue={editingAdmin?.phone ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="9876543210"
+    />
+  </div>
+
+  <div className="grid grid-cols-2 gap-3">
+    <select name="role" defaultValue={editingAdmin?.role ?? 'admin'} className="p-3 border rounded-lg">
+      <option value="admin">Admin</option>
+      <option value="superadmin">Superadmin</option>
+      <option value="user">User</option>
+    </select>
+
+    <input type="hidden" name="user_type" defaultValue={editingAdmin?.user_type ?? (editingAdmin?.role ?? 'admin')} />
+  </div>
+
+
+
+
+
+
+
+
+
+
+
+
+{/* Address (prefill from editingAdmin.address) */}
+<div>
+  <label className="block text-sm font-medium mb-2">Street</label>
+  <input
+    type="text"
+    name="address_street"
+    defaultValue={editingAdmin?.address?.street ?? editingAdmin?.address_street ?? ""}
+    placeholder="Street"
+    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+</div>
+<div className="grid grid-cols-3 gap-3">
+  <input
+    type="text"
+    name="address_city"
+    placeholder="City"
+    defaultValue={editingAdmin?.address?.city ?? editingAdmin?.address_city ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_state"
+    placeholder="State"
+    defaultValue={editingAdmin?.address?.state ?? editingAdmin?.address_state ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_zip_code"
+    placeholder="Zip Code"
+    defaultValue={editingAdmin?.address?.zip ?? editingAdmin?.address_zip_code ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  {/* Actions */}
+  <div className="flex space-x-3 pt-4">
+    <button
+      type="button"
+      onClick={() => { setShowAdminModal(false); setEditingAdmin(null); }}
+      className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer"
+    >
+      Cancel
+    </button>
+    <button
+      type="submit"
+      className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer"
+    >
+      {editingAdmin ? 'Update Admin' : 'Add Admin'}
+    </button>
+  </div>
+</form>
+
+
+
+
+
+
+    </div>
+  </div>
+)}
 
       {/* Category Modal */}
 {showCategoryModal && selectedCategory && (() => {

@@ -1,6 +1,10 @@
 {
+  "/api/orders/list/route": "app/api/orders/list/route.js",
+  "/api/admins/list/route": "app/api/admins/list/route.js",
+  "/login/page": "app/login/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/contact/page": "app/contact/page.js",
-  "/page": "app/page.js",
-  "/profile/page": "app/profile/page.js"
+  "/orders/page": "app/orders/page.js",
+  "/profile/page": "app/profile/page.js",
+  "/menu/page": "app/menu/page.js",
+  "/page": "app/page.js"
 }

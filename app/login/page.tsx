@@ -3,7 +3,7 @@
 import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase'; // keep your existing client
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -11,46 +11,150 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
 
-      if (error) throw error;
-      if (!data.user) throw new Error('Login failed');
 
-      // ✅ Get role from metadata
-      const userRole = data.user.user_metadata?.role;
 
-      if (!userRole) {
-        throw new Error('User role is missing. Contact admin.');
-      }
+const resolveRoleFromUserObject = (user: any) => {
+  if (!user) return null;
+  // 1) app metadata (server-side custom claims)
+  const appMetaRole = user?.app_metadata?.role ?? user?.app_metadata?.user_type ?? null;
+  if (appMetaRole) return String(appMetaRole);
 
-      // Save user info locally
-      localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('userData', JSON.stringify(data.user));
-      localStorage.setItem('userType', userRole);
+  // 2) user metadata (client-provided)
+  const userMetaRole = user?.user_metadata?.role ?? user?.user_metadata?.user_type ?? null;
+  if (userMetaRole) return String(userMetaRole);
 
-      // ✅ Redirect based on role
-      if (userRole === 'superadmin') {
-        window.location.href = '/dashboard';
-      } else if (userRole === 'admin') {
-        window.location.href = '/admin-panel';
-      } else {
-        window.location.href = '/menu';
-      }
-    } catch (err: any) {
-      setError(err.message || 'Login failed. Please try again.');
-    } finally {
-      setIsLoading(false);
+  // 3) top-level (rare)
+  if (user?.role) return String(user.role);
+
+  return null;
+};
+
+const decodeJwtRole = (token?: string) => {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
+      atob(b64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const obj = JSON.parse(json);
+    return obj?.role ?? obj?.user_metadata?.role ?? obj?.app_metadata?.role ?? null;
+  } catch (err) {
+    console.debug('decodeJwtRole failed', err);
+    return null;
+  }
+};
+
+
+
+
+
+
+
+// --- replace your existing handleSubmit with this improved version ---
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setIsLoading(true);
+  setError('');
+
+  try {
+    // Sign in with email/password
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) throw signInError;
+    if (!data || !data.user) throw new Error('Login failed. No user returned.');
+
+    const user = data.user;
+    const token = data.session?.access_token ?? null;
+
+    // Save token and user id locally (best-effort)
+    try { if (token) localStorage.setItem('authToken', token); } catch (_) {}
+    try { localStorage.setItem('userData', JSON.stringify(user)); } catch (_) {}
+    try { if (user.id) localStorage.setItem('userId', user.id); } catch (_) {}
+
+    // 1) Try role from user object (app/user metadata or top-level)
+    let userRole: string | null = resolveRoleFromUserObject(user);
+
+    // 2) Try decode JWT (access token) for custom claims
+    if (!userRole) {
+      userRole = decodeJwtRole(token) ?? null;
+      if (userRole) console.debug('Role from JWT claims:', userRole);
     }
-  };
+
+    // 3) Fallback: canonical profiles table (server-controlled)
+    if (!userRole) {
+      try {
+        const { data: profileRow, error: profileErr } = await supabase
+          .from('profiles') // adjust to 'users' if you store role there
+          .select('role, user_type')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (!profileErr && profileRow) {
+          userRole = profileRow.role ?? profileRow.user_type ?? null;
+          if (userRole) console.debug('Role from profiles table:', userRole);
+        } else if (profileErr) {
+          console.debug('profiles lookup error', profileErr);
+        }
+      } catch (err) {
+        console.warn('profiles lookup failed', err);
+      }
+    }
+
+    // Final fallback: default to 'user' (prevents blocking login)
+    if (!userRole) {
+      console.warn('Role not found for user. Defaulting to "user". Please ensure role is set on creation.');
+      userRole = 'user';
+    }
+
+    // Persist role + logged in flag
+    try { localStorage.setItem('isLoggedIn', 'true'); } catch (_) {}
+    try { localStorage.setItem('userType', String(userRole)); } catch (_) {}
+    try {
+      const minimalUser = { id: user.id, email: user.email, role: userRole };
+      localStorage.setItem('userMinimal', JSON.stringify(minimalUser));
+    } catch (_) {}
+
+    // Redirect based on role
+    if (userRole === 'superadmin') {
+      window.location.href = '/dashboard';
+    } else if (userRole === 'admin') {
+      window.location.href = '/dashboard';
+    } else {
+      window.location.href = '/menu';
+    }
+  } catch (err: any) {
+    console.error('Login error:', err);
+    const msg = err?.message ?? 'Login failed. Please try again.';
+    setError(msg);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -28,8 +28,12 @@ export default function CheckoutPage() {
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   useEffect(() => {
-    loadMenuAndCart();
-    fetchUserProfile();
+    // Load menu, cart and then user profile (profile needs to populate fields)
+    (async () => {
+      await loadMenuAndCart();
+      await fetchUserProfileAndFill();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadMenuAndCart = async () => {
@@ -43,13 +47,13 @@ export default function CheckoutPage() {
         body: JSON.stringify({ action: 'getMenuData' })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (data.success && data.menuItems) {
         setMenuItems(data.menuItems);
 
         const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
         const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => {
-          const item = data.menuItems.find((i: any) => i.id === parseInt(itemId));
+          const item = data.menuItems.find((i: any) => String(i.id) === String(itemId));
           if (item) {
             return {
               ...item,
@@ -63,26 +67,43 @@ export default function CheckoutPage() {
         setCartItems(cartArray as any[]);
       } else {
         console.error('Failed to load menu items from function');
+        // Try to reconstruct cart from menuItems if none, or fallback to localStorage-only
+        const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
+        const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => ({
+          id: itemId,
+          name: `Item ${itemId}`,
+          price: 0,
+          image_url: '',
+          quantity
+        }));
+        setCartItems(cartArray as any[]);
       }
 
-      // Load user info if logged in (local fallback)
-      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-      if (isLoggedIn) {
-        const userInfo = JSON.parse(localStorage.getItem('userData') || '{}');
-        if (userInfo.firstName || userInfo.email) {
-          setCustomerInfo({
-            firstName: userInfo.firstName || '',
-            lastName: userInfo.lastName || '',
-            email: userInfo.email || '',
-            phone: userInfo.phone || ''
-          });
-        }
+      // If user info exists in localStorage, keep it as fallback (we'll override with DB values if available)
+      const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+      if (storedUser && (storedUser.firstName || storedUser.email)) {
+        setCustomerInfo({
+          firstName: storedUser.firstName || '',
+          lastName: storedUser.lastName || '',
+          email: storedUser.email || '',
+          phone: storedUser.phone || ''
+        });
+      }
+      const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+      if (storedAddress && (storedAddress.street || storedAddress.city)) {
+        setAddress({
+          street: storedAddress.street || '',
+          city: storedAddress.city || '',
+          state: storedAddress.state || '',
+          zipCode: storedAddress.zipCode || ''
+        });
       }
     } catch (error) {
       console.error('Error loading menu and cart:', error);
     }
   };
 
+  // subtotal, deliveryFee, tax, total
   const subtotal = cartItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0);
   const deliveryFee = orderType === 'delivery' ? 50 : 0;
   const tax = Math.round((subtotal + deliveryFee) * 0.13);
@@ -206,47 +227,74 @@ export default function CheckoutPage() {
     }
   };
 
-  const fetchUserProfile = async () => {
+  // fetch user profile and fill customer + address inputs
+  const fetchUserProfileAndFill = async () => {
     try {
-      const { data, error: authError } = await supabase.auth.getUser();
+      // 1) try supabase auth
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      const user = userData?.user ?? null;
 
-      if (authError || !data?.user) {
-        console.log('User not logged in', authError?.message);
+      if (!user) {
+        // not logged in — try localStorage fallback only (already applied in loadMenuAndCart)
         return;
       }
 
-      const user = data.user;
-
+      // 2) fetch profile row from 'profiles' or 'users' table (adjust table name if different)
+      // This code assumes you have a 'profiles' table keyed by user's id
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('first_name,last_name,phone,street,city,state,zip_code,email')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (profileError) {
-        console.log('Profile fetch error:', profileError.message);
-        return;
+        console.warn('Profile fetch error (may not exist):', profileError);
       }
 
+      // Compose values: priority -> DB profile fields -> auth user email -> localStorage fallback
+      const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+      const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+
+      const firstName = profile?.first_name ?? storedUser.firstName ?? '';
+      const lastName = profile?.last_name ?? storedUser.lastName ?? '';
+      const emailFromProfile = profile?.email ?? user.email ?? storedUser.email ?? '';
+      const phone = profile?.phone ?? storedUser.phone ?? '';
+
       setCustomerInfo({
-        firstName: profile.first_name || '',
-        lastName: profile.last_name || '',
-        email: user.email || '',
-        phone: profile.phone || ''
+        firstName: firstName,
+        lastName: lastName,
+        email: emailFromProfile,
+        phone: phone
       });
+
+      // address profile fields may use snake_case or camelCase; handle both possibilities
+      const street = profile?.street ?? profile?.street_address ?? storedAddress.street ?? '';
+      const city = profile?.city ?? storedAddress.city ?? '';
+      const state = profile?.state ?? storedAddress.state ?? '';
+      const zip = profile?.zip_code ?? profile?.zipCode ?? storedAddress.zipCode ?? '';
 
       setAddress({
-        street: profile.street || '',
-        city: profile.city || '',
-        state: profile.state || '',
-        zipCode: profile.zip_code || ''
+        street,
+        city,
+        state,
+        zipCode: zip
       });
 
-    } catch (error) {
-      console.log('Error fetching user profile:', error);
+      // Also store into localStorage for offline fallback
+      try {
+        localStorage.setItem('userData', JSON.stringify({
+          firstName, lastName, email: emailFromProfile, phone
+        }));
+        localStorage.setItem('userAddress', JSON.stringify({ street, city, state, zipCode: zip }));
+      } catch (e) {
+        // ignore localStorage failures
+      }
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
     }
   };
 
+  // If cart empty UI
   if (cartItems.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -265,6 +313,7 @@ export default function CheckoutPage() {
     );
   }
 
+  // main render
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
@@ -400,18 +449,6 @@ export default function CheckoutPage() {
               )}
 
               <div className="bg-white rounded-2xl shadow-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">Special Instructions</h2>
-                <textarea
-                  value={specialInstructions}
-                  onChange={(e) => setSpecialInstructions(e.target.value)}
-                  placeholder="Any special requests or dietary restrictions..."
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none"
-                  rows={3}
-                  maxLength={500}
-                />
-              </div>
-
-              <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
                 <div className="space-y-3">
                   <label className="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
@@ -447,7 +484,7 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* Order Summary */}
+            {/* Order Summary (right side) */}
             <div className="lg:sticky lg:top-8 h-fit">
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Order Summary</h2>
@@ -474,22 +511,12 @@ export default function CheckoutPage() {
                     <span>Subtotal</span>
                     <span>₨{subtotal.toLocaleString()}</span>
                   </div>
-                  {deliveryFee > 0 && (
-                    <div className="flex justify-between">
-                      <span>Delivery Fee</span>
-                      <span>₨{deliveryFee.toLocaleString()}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span>VAT (13%)</span>
-                    <span>₨{tax.toLocaleString()}</span>
-                  </div>
+
                   <div className="border-t pt-2 flex justify-between font-bold text-lg">
                     <span>Total</span>
                     <span className="text-orange-600">₨{total.toLocaleString()}</span>
                   </div>
                 </div>
-
 
                 <div className="mt-6 p-4 bg-orange-50 rounded-lg">
                   <div className="flex items-center space-x-2">
