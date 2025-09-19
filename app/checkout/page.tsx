@@ -109,9 +109,8 @@ export default function CheckoutPage() {
 
   // subtotal, deliveryFee, tax, total
   const subtotal = cartItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0);
-  const deliveryFee = orderType === 'delivery' ? 50 : 0;
-  const tax = Math.round((subtotal + deliveryFee) * 0.13);
-  const total = subtotal + deliveryFee + tax;
+
+  const total = subtotal;
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,8 +142,7 @@ export default function CheckoutPage() {
         order_type: orderType,
         address: orderType === 'delivery' ? address : null,
         subtotal,
-        delivery_fee: deliveryFee,
-        tax,
+
         total,
         payment_method: paymentMethod === 'cod' ? 'Cash on Delivery' : 'Card Payment',
         special_instructions: specialInstructions,
@@ -169,8 +167,7 @@ export default function CheckoutPage() {
             order_type: orderData.order_type,
             address: orderData.address,
             subtotal: orderData.subtotal,
-            delivery_fee: orderData.delivery_fee,
-            tax: orderData.tax,
+
             total: orderData.total,
             payment_method: orderData.payment_method,
             special_instructions: orderData.special_instructions,
