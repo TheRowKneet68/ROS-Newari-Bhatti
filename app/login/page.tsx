@@ -11,6 +11,11 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+const [showForgot, setShowForgot] = useState(false);
+const [forgotEmail, setForgotEmail] = useState('');
+const [forgotMsg, setForgotMsg] = useState<string | null>(null);
+const [forgotError, setForgotError] = useState<string | null>(null);
+const [forgotLoading, setForgotLoading] = useState(false);
 
 
 
@@ -52,7 +57,34 @@ const decodeJwtRole = (token?: string) => {
   }
 };
 
+const handleResetPassword = async (e?: React.FormEvent) => {
+  if (e) e.preventDefault();
+  setForgotError(null);
+  setForgotMsg(null);
 
+  const emailToSend = (forgotEmail || email || '').trim();
+  if (!emailToSend) {
+    setForgotError('Please enter your email address.');
+    return;
+  }
+
+  setForgotLoading(true);
+  try {
+    const redirectTo = process.env.NEXT_PUBLIC_PASSWORD_RESET_REDIRECT || undefined;
+
+    // supabase-js v2
+    const { data, error } = await supabase.auth.resetPasswordForEmail(emailToSend, redirectTo ? { redirectTo } : {});
+    if (error) throw error;
+
+    setForgotMsg('If an account exists for that email, a password reset link has been sent. Check your email (including spam).');
+    setForgotEmail('');
+  } catch (err: any) {
+    console.error('Reset password error', err);
+    setForgotError(err?.message ?? 'Failed to send reset email. Please try again later.');
+  } finally {
+    setForgotLoading(false);
+  }
+};
 
 
 
@@ -206,6 +238,48 @@ const handleSubmit = async (e: React.FormEvent) => {
               Sign up
             </Link>
           </p>
+
+{/* Forgot password link */}
+<div className="text-right mt-2">
+  {!showForgot ? (
+    <button
+      type="button"
+      onClick={() => { setShowForgot(true); setForgotMsg(null); setForgotError(null); }}
+      className="text-sm text-orange-600 hover:text-orange-700"
+    >
+      Forgot password?
+    </button>
+  ) : (
+    <form onSubmit={handleResetPassword} className="mt-3">
+      <div className="flex gap-2">
+        <input
+          type="email"
+          placeholder="Enter your email to reset"
+          value={forgotEmail}
+          onChange={(e) => setForgotEmail(e.target.value)}
+          className="flex-1 p-2 border border-gray-300 rounded-lg"
+          required
+        />
+        <button
+          type="submit"
+          disabled={forgotLoading}
+          className={`px-4 rounded-lg font-semibold ${forgotLoading ? 'bg-gray-300 text-gray-500' : 'bg-orange-600 text-white hover:bg-orange-700'}`}
+        >
+          {forgotLoading ? 'Sending...' : 'Send'}
+        </button>
+        <button type="button" onClick={() => { setShowForgot(false); setForgotEmail(''); setForgotError(null); setForgotMsg(null); }} className="px-3 rounded-lg border border-gray-200"> Cancel</button>
+      </div>
+
+      {forgotMsg && <p className="mt-2 text-sm text-green-700">{forgotMsg}</p>}
+      {forgotError && <p className="mt-2 text-sm text-red-700">{forgotError}</p>}
+    </form>
+  )}
+</div>
+
+
+
+
+
         </div>
       </div>
     </div>
