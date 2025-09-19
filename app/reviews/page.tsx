@@ -1,347 +1,279 @@
-// app/reviews/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import Header from '../../components/Header';
-import ReviewForm from '../../components/ReviewForm';
 import Link from 'next/link';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../lib/supabase';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
-);
+export default function RegisterPage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+    address: {
+      street: '',
+      city: 'Pokhara',
+      state: 'Gandaki Province',
+      zipCode: '33700',
+    },
+  });
 
-export default function ReviewsPage() {
-  const [reviews, setReviews] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(9); // initial items to show
-  const [filterRating, setFilterRating] = useState<number | 'all'>('all'); // 'all' | 5 | 4 | ...
+  const validateForm = () => {
+    const newErrors: { [key: string]: string } = {};
+    if (!formData.firstName.trim()) newErrors.firstName = 'First name is required';
+    if (!formData.lastName.trim()) newErrors.lastName = 'Last name is required';
+    if (!formData.email.trim()) newErrors.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Email is invalid';
+    if (!formData.phone.trim()) newErrors.phone = 'Phone number is required';
+    if (!formData.password) newErrors.password = 'Password is required';
+    else if (formData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
+    if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
 
-  // loadReviews defined inside component so addReview can call it
-  const loadReviews = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('reviews')
-        .select('*')
-        .order('created_at', { ascending: false });
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
-      if (error) {
-        console.error('Error fetching reviews:', error);
-        setReviews([]);
-        return;
-      }
-
-      const arr = (data || []) as any[];
-
-      // Normalize common fields so the UI can use the same props
-      const normalized = arr.map((r: any) => ({
-        ...r,
-        customer_name: r.customer_name || r.name || r.full_name || 'Anonymous',
-        review_text: r.review_text || r.text || r.comment || '',
-        rating: Number(r.rating) || 0,
-        created_at: r.created_at || r.createdAt || null,
-        is_featured: !!r.is_featured
+  const handleChange = (field: string, value: string) => {
+    if (field.startsWith('address.')) {
+      const key = field.split('.')[1];
+      setFormData((prev) => ({
+        ...prev,
+        address: { ...prev.address, [key]: value },
       }));
-
-      // Put featured first
-      const featured = normalized.filter((r) => r.is_featured);
-      const others = normalized.filter((r) => !r.is_featured);
-      setReviews([...featured, ...others]);
-    } catch (err) {
-      console.error('Unexpected error fetching reviews:', err);
-      setReviews([]);
-    } finally {
-      setLoading(false);
+    } else {
+      setFormData((prev) => ({ ...prev, [field]: value }));
     }
   };
 
-  useEffect(() => {
-    loadReviews();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  const addReview = async (newReview: any) => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/review-service`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+
+
+
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!validateForm()) return;
+
+  setIsLoading(true);
+  setErrors({});
+
+  try {
+    // Always assign 'user' role on signup from public registration page
+    const user_type = 'user';
+
+    // Normalize address shape for DB
+    const addressForDb = {
+      street: formData.address.street || null,
+      city: formData.address.city || null,
+      state: formData.address.state || null,
+      zip: formData.address.zipCode || null,
+    };
+
+    // Create user in Supabase Auth (signUp) with metadata
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: formData.email,
+      password: formData.password,
+      options: {
+        data: {
+          role: user_type,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+          address: addressForDb,
         },
-        body: JSON.stringify({
-          action: 'createReview',
-          reviewData: {
-            name: newReview.name,
-            email: newReview.email,
-            rating: newReview.rating,
-            text: newReview.text
-          }
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        // small toast
-        const successToast = document.createElement('div');
-        successToast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300';
-        successToast.innerHTML = `<div class="flex items-center space-x-2"><i class="ri-check-circle-line text-xl"></i><span>Thank you for your review! It has been posted.</span></div>`;
-        document.body.appendChild(successToast);
-        setTimeout(() => {
-          successToast.style.opacity = '0';
-          successToast.style.transform = 'translateX(100%)';
-          setTimeout(() => {
-            if (document.body.contains(successToast)) {
-              document.body.removeChild(successToast);
-            }
-          }, 300);
-        }, 4000);
-
-        // reload reviews after successful submission
-        await loadReviews();
-      } else {
-        alert('Error submitting review: ' + (data.error || 'Please try again.'));
-      }
-    } catch (error) {
-      console.error('Error submitting review:', error);
-      alert('Error submitting review. Please check your connection and try again.');
-    }
-  };
-
-  const loadMore = () => setVisibleCount((prev) => prev + 9);
-
-  const SkeletonReview = () => <div className="bg-gray-200 rounded-2xl h-40 p-4" />;
-
-  // -------- Metrics and filtering ----------
-  const ratingCounts = useMemo(() => {
-    const counts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    for (const r of reviews) {
-      const rate = Math.min(5, Math.max(1, Math.round(Number(r.rating) || 0)));
-      counts[rate] = (counts[rate] || 0) + 1;
-    }
-    return counts;
-  }, [reviews]);
-
-  const totalReviews = useMemo(() => reviews.length, [reviews]);
-
-  const averageRating = useMemo(() => {
-    if (!reviews.length) return 0;
-    const sum = reviews.reduce((s, r) => s + (Number(r.rating) || 0), 0);
-    return Math.round((sum / reviews.length) * 10) / 10; // one decimal like Play Store
-  }, [reviews]);
-
-  const ratingPercent = (star: number) => {
-    if (totalReviews === 0) return 0;
-    return Math.round(((ratingCounts[star] || 0) / totalReviews) * 100);
-  };
-
-  // helper to render star icons
-  const Stars = ({ value, size = 'text-lg' }: { value: number; size?: string }) => {
-    const v = Math.round(Number(value) || 0);
-    return (
-      <div className={`inline-flex items-center ${size}`}>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <i key={i} className={`ri-star-${i <= v ? 'fill' : 'line'} text-yellow-400 ${i < 5 ? 'mr-0.5' : ''}`}></i>
-        ))}
-      </div>
-    );
-  };
-
-  // toggle or set filter
-  const handleFilterClick = (star: number) => {
-    setFilterRating((prev) => (prev === star ? 'all' : star));
-    setVisibleCount(9);
-  };
-
-  // sorted + filtered list used for rendering
-  const sortedReviews = useMemo(() => {
-    let list = [...reviews];
-
-    if (filterRating !== 'all') {
-      list = list.filter((r) => Math.round(Number(r.rating) || 0) === filterRating);
-    }
-
-    // Sort newest first
-    list.sort((a, b) => {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return tb - ta;
+      },
     });
 
-    return list;
-  }, [reviews, filterRating]);
+    if (authError) throw authError;
+    if (!authData?.user?.id) throw new Error('Registration failed: no user returned from auth');
+
+    // Insert the user row into your users table with the same auth UID
+    const { error: insertError } = await supabase.from('users').insert({
+      id: authData.user.id,
+      email: formData.email,
+      first_name: formData.firstName,
+      last_name: formData.lastName,
+      phone: formData.phone,
+      address: addressForDb,
+      address_street: addressForDb.street,
+      address_city: addressForDb.city,
+      address_state: addressForDb.state,
+      address_zip_code: addressForDb.zip,
+      user_type,
+      role: user_type,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (insertError) throw insertError;
+
+    // Redirect regular users to /menu
+    router.push('/menu');
+  } catch (err: any) {
+    console.error('Registration error:', err);
+    setErrors({ general: err?.message || 'Registration failed. Please try again.' });
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
-
-      <div className="container mx-auto px-4 py-12">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">Customer Reviews</h1>
-          <Link href="/" className="text-orange-600 hover:text-orange-700">Back to Home</Link>
-        </div>
-
-        <p className="text-gray-600 mb-8 max-w-xl">
-          Featured reviews appear first. Read what customers say about Newari Bhatti & Kathmandu Momo Ghar.
-        </p>
-
-
-
-
-
-
-
-
-{/* Responsive rating summary (mobile-first) */}
-        <div className="bg-white rounded-2xl shadow-lg p-4 md:p-6 mb-8">
-        <div className="flex flex-col md:flex-row md:items-center md:space-x-6">
-            {/* Left column: average + stars */}
-            <div className="flex-shrink-0 text-center md:text-left mb-4 md:mb-0">
-            <div className="text-3xl md:text-4xl font-bold text-gray-800">{averageRating.toFixed(1)}</div>
-            <div className="mt-1"><Stars value={averageRating} size="text-sm md:text-base" /></div>
-            <div className="text-xs md:text-sm text-gray-500 mt-1">{totalReviews} {totalReviews === 1 ? 'review' : 'reviews'}</div>
+      <div className="container mx-auto px-4 py-16">
+        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="ri-user-add-line text-2xl text-orange-600"></i>
             </div>
-
-            {/* vertical divider on md+ */}
-            <div className="hidden md:block w-px h-16 bg-gray-100" />
-
-            {/* Right column: distribution rows */}
-            <div className="flex-1">
-            {[5, 4, 3, 2, 1].map((star) => (
-                <button
-                key={star}
-                type="button"
-                onClick={() => setFilterRating(prev => (prev === star ? 'all' : star))}
-                className="w-full flex items-center gap-3 mb-3 md:mb-4 px-1 py-2 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-200"
-                aria-pressed={filterRating === star}
-                title={filterRating === star ? `Showing ${star}-star reviews. Click to clear.` : `Show ${star}-star reviews`}
-                >
-                {/* star label (fixed width) */}
-                <span className="w-9 text-sm md:text-sm flex-shrink-0 text-left">{star}★</span>
-
-                {/* bar: fills remaining horizontal space */}
-                <div className="flex-1">
-                    <div className="bg-gray-100 rounded-full h-3 md:h-4 overflow-hidden">
-                    <div
-                        className="h-3 md:h-4 rounded-full bg-orange-500 transition-all duration-300"
-                        style={{ width: `${ratingPercent(star)}%` }}
-                        aria-hidden
-                    />
-                    </div>
-                </div>
-
-                {/* count pill - larger tappable target on mobile */}
-                <span className={`ml-3 text-sm md:text-sm font-medium px-3 py-1 rounded-full ${filterRating === star ? 'bg-orange-600 text-white' : 'bg-white text-gray-700 border border-gray-100'}`}>
-                    {ratingCounts[star as 1 | 2 | 3 | 4 | 5] || 0}
-                </span>
-                </button>
-            ))}
-
-            {/* actions: See all or Show all */}
-            <div className="mt-3 md:mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-
-
-                <button
-                onClick={() => { setFilterRating('all'); setVisibleCount(9); }}
-                className={`inline-flex justify-center items-center px-5 py-2 md:px-6 md:py-3 rounded-full font-semibold transition ${filterRating === 'all' ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                >
-                Show all
-                </button>
-            </div>
-            </div>
-        </div>
-        </div>
-
-
-
-
-
-
-
-
-        {loading ? (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-            <SkeletonReview />
-            <SkeletonReview />
-            <SkeletonReview />
+            <h1 className="text-2xl font-bold text-gray-800 mb-2">Create Account</h1>
+            <p className="text-gray-600">Join Newari Bhatti & Kathmandu Momo Ghar family</p>
           </div>
-        ) : sortedReviews.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="w-16 h-16 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center">
-              <i className="ri-chat-3-line text-2xl text-gray-400"></i>
-            </div>
-            <p className="text-gray-500">No reviews match this filter.</p>
-          </div>
-        ) : (
-          <>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-8">
-              {sortedReviews.slice(0, visibleCount).map((review) => (
-                <div key={review.id} className="bg-white rounded-2xl shadow-lg p-6">
-                  <div className="flex items-center mb-4">
-                    <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mr-4">
-                      <i className="ri-user-line text-orange-600 text-xl"></i>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-800">{review.customer_name || 'Anonymous'}</h4>
-                        <div className="flex items-center">
-                          <Stars value={Math.round(Number(review.rating) || 0)} size="text-base" />
-                        </div>
-                      </div>
-                      <div className="text-sm text-gray-500">{review.created_at ? new Date(review.created_at).toLocaleDateString() : ''}</div>
-                    </div>
-                  </div>
 
-                  <p className="text-gray-600 mb-4">"{review.review_text || ''}"</p>
-
-                  {review.is_featured && (
-                    <div className="mt-3">
-                      <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-semibold">Featured Review</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {visibleCount < sortedReviews.length && (
-              <div className="text-center">
-                <button
-                  onClick={loadMore}
-                  className="bg-white border border-gray-200 px-6 py-3 rounded-full font-semibold hover:shadow transition"
-                >
-                  Load more reviews
-                </button>
+          {errors.general && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center space-x-2">
+                <i className="ri-error-warning-line text-red-600"></i>
+                <p className="text-red-800">{errors.general}</p>
               </div>
-            )}
-          </>
-        )}
+            </div>
+          )}
 
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Name Fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <input
+                type="text"
+                placeholder="First Name"
+                value={formData.firstName}
+                onChange={(e) => handleChange('firstName', e.target.value)}
+                className={`w-full p-3 border rounded-lg ${errors.firstName ? 'border-red-500' : 'border-gray-300'}`}
+                required
+              />
+              <input
+                type="text"
+                placeholder="Last Name"
+                value={formData.lastName}
+                onChange={(e) => handleChange('lastName', e.target.value)}
+                className={`w-full p-3 border rounded-lg ${errors.lastName ? 'border-red-500' : 'border-gray-300'}`}
+                required
+              />
+            </div>
 
+            {/* Email & Phone */}
+            <input
+              type="email"
+              placeholder="Email Address"
+              value={formData.email}
+              onChange={(e) => handleChange('email', e.target.value)}
+              className={`w-full p-3 border rounded-lg ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
+              required
+            />
+            {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
 
+            <input
+              type="tel"
+              placeholder="Phone Number (+977-XXXXXXXXXX)"
+              value={formData.phone}
+              onChange={(e) => handleChange('phone', e.target.value)}
+              className={`w-full p-3 border rounded-lg ${errors.phone ? 'border-red-500' : 'border-gray-300'}`}
+              required
+            />
+            {errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone}</p>}
 
+            {/* Address */}
+            <input
+              type="text"
+              placeholder="Street Address"
+              value={formData.address.street}
+              onChange={(e) => handleChange('address.street', e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg"
+            />
 
+            <div className="grid grid-cols-3 gap-4">
+              <input
+                type="text"
+                placeholder="City"
+                value={formData.address.city}
+                onChange={(e) => handleChange('address.city', e.target.value)}
+                className="p-3 border border-gray-300 rounded-lg"
+              />
+              <input
+                type="text"
+                placeholder="State"
+                value={formData.address.state}
+                onChange={(e) => handleChange('address.state', e.target.value)}
+                className="p-3 border border-gray-300 rounded-lg"
+              />
+              <input
+                type="text"
+                placeholder="ZIP"
+                value={formData.address.zipCode}
+                onChange={(e) => handleChange('address.zipCode', e.target.value)}
+                className="p-3 border border-gray-300 rounded-lg"
+              />
+            </div>
 
+            {/* Password Fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <input
+                type="password"
+                placeholder="Password"
+                value={formData.password}
+                onChange={(e) => handleChange('password', e.target.value)}
+                className={`w-full p-3 border rounded-lg ${errors.password ? 'border-red-500' : 'border-gray-300'}`}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Confirm Password"
+                value={formData.confirmPassword}
+                onChange={(e) => handleChange('confirmPassword', e.target.value)}
+                className={`w-full p-3 border rounded-lg ${errors.confirmPassword ? 'border-red-500' : 'border-gray-300'}`}
+                required
+              />
+            </div>
 
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isLoading}
+              className={`w-full py-4 rounded-lg font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                isLoading
+                  ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                  : 'bg-orange-600 text-white hover:bg-orange-700'
+              }`}
+            >
+              {isLoading ? 'Creating Account...' : 'Create Account'}
+            </button>
+          </form>
 
-
-
-
-        <div className="max-w-2xl mx-auto mt-12">
-          <h3 className="text-2xl font-bold text-center mb-8 text-gray-800">
-            Share Your Experience
-          </h3>
-          <ReviewForm onSubmit={addReview} />
+          <div className="mt-6 text-center">
+            <p className="text-gray-600">
+              Already have an account?{' '}
+              <Link href="/login" className="text-orange-600 hover:text-orange-700 font-semibold cursor-pointer">
+                Sign in here
+              </Link>
+            </p>
+          </div>
         </div>
-
-
-
-
-
-
-
-
-        
       </div>
     </div>
   );
