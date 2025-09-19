@@ -146,6 +146,45 @@ const makeFilename = (originalName: string) => {
 
 
 
+// helpers to edit / delete social links in restaurantInfo
+const handleEditSocial = (field: 'facebook_url' | 'instagram_url' | 'tiktok_url') => {
+  // simply open the modal — the modal form will show current values
+  setShowRestaurantInfoModal(true);
+  // optional: scroll modal into view if needed
+  setTimeout(() => {
+    const el = document.querySelector('#restaurant-info-modal');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50);
+};
+
+const handleDeleteSocial = async (field: 'facebook_url' | 'instagram_url' | 'tiktok_url') => {
+  if (!restaurantInfo?.id) {
+    alert('No restaurant record to update.');
+    return;
+  }
+  if (!confirm('Are you sure you want to remove this link?')) return;
+
+  // build updates object with the field set to null (or '' if you prefer)
+  const updates: any = { id: restaurantInfo.id };
+  updates[field] = null; // server will set NULL; if your API expects empty string, change to ''
+
+  const ok = await updateRestaurantInfo(updates);
+  if (!ok) {
+    // updateRestaurantInfo already shows toasts on failure
+    return;
+  }
+  showSuccessToast?.('Link removed');
+};
+
+
+
+
+
+
+
+
+
+
 
 // call this from your input onChange or wherever you handle upload
 async function uploadImageFile(file: File, userId?: string) {
@@ -3720,31 +3759,127 @@ const handleAdminSave = async (payload: any) => {
               </div>
 
               <div className="space-y-6">
+
+
+
+
+
                 {/* Restaurant Info */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">Restaurant Information</h3>
-                    <button
-                      onClick={() => setShowRestaurantInfoModal(true)}
-                      className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                    >
-                      <i className="ri-edit-line"></i>
-                    </button>
-                  </div>
-                  <div className="space-y-2 text-sm">
+<div className="bg-gray-50 rounded-lg p-4">
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-lg font-semibold">Restaurant Information</h3>
+    <button
+      onClick={() => setShowRestaurantInfoModal(true)}
+      className="text-orange-600 hover:text-orange-700 cursor-pointer"
+      title="Edit restaurant info"
+    >
+      <i className="ri-edit-line"></i>
+    </button>
+  </div>
 
-                    
-                    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
-                    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
-                    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
-                    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
-                  
-                  
-                  
-                  </div>
-                </div>
+  <div className="space-y-2 text-sm">
+    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
+    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
+    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
+    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
 
+    {/* Social links */}
+    <div className="mt-3">
+      <h4 className="text-sm font-medium text-gray-700 mb-2">Social Links</h4>
 
+      {/* Facebook */}
+      <div className="flex items-center justify-between">
+        {restaurantInfo?.facebook_url ? (
+          <>
+            <a
+              href={restaurantInfo.facebook_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline truncate max-w-xs"
+              title={restaurantInfo.facebook_url}
+            >
+              <i className="ri-facebook-fill mr-2"></i>Facebook
+            </a>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleEditSocial('facebook_url')}
+                className="text-orange-600 hover:text-orange-700"
+                title="Edit Facebook link"
+              >
+                <i className="ri-edit-line"></i>
+              </button>
+              <button
+                onClick={() => handleDeleteSocial('facebook_url')}
+                className="text-red-600 hover:text-red-700"
+                title="Delete Facebook link"
+              >
+                <i className="ri-delete-bin-line"></i>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">Facebook: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+      {/* Instagram */}
+      <div className="flex items-center justify-between mt-2">
+        {restaurantInfo?.instagram_url ? (
+          <>
+            <a
+              href={restaurantInfo.instagram_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-pink-600 hover:underline truncate max-w-xs"
+              title={restaurantInfo.instagram_url}
+            >
+              <i className="ri-instagram-line mr-2"></i>Instagram
+            </a>
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleEditSocial('instagram_url')} className="text-orange-600 hover:text-orange-700" title="Edit Instagram link"><i className="ri-edit-line"></i></button>
+              <button onClick={() => handleDeleteSocial('instagram_url')} className="text-red-600 hover:text-red-700" title="Delete Instagram link"><i className="ri-delete-bin-line"></i></button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">Instagram: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+      {/* TikTok */}
+      <div className="flex items-center justify-between mt-2">
+        {restaurantInfo?.tiktok_url ? (
+          <>
+            <a
+              href={restaurantInfo.tiktok_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-black hover:underline truncate max-w-xs"
+              title={restaurantInfo.tiktok_url}
+            >
+              <i className="ri-play-circle-line mr-2"></i>TikTok
+            </a>
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleEditSocial('tiktok_url')} className="text-orange-600 hover:text-orange-700" title="Edit TikTok link"><i className="ri-edit-line"></i></button>
+              <button onClick={() => handleDeleteSocial('tiktok_url')} className="text-red-600 hover:text-red-700" title="Delete TikTok link"><i className="ri-delete-bin-line"></i></button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">TikTok: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+    </div>
+  </div>
+</div>
 
 
 
@@ -3820,7 +3955,7 @@ const handleAdminSave = async (payload: any) => {
 
 
 
-                {/* Review Management Summary */}
+                {/* Review Management Summary
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="text-lg font-semibold mb-2">Review Management</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -3833,14 +3968,24 @@ const handleAdminSave = async (payload: any) => {
                       <p className="text-gray-600">Pending</p>
                     </div>
                   </div>
-                </div>
+                </div> */}
               </div>
             </div>
           </div>
         </div>
       )}
 
+
+
+
+
+
+
+
       {/* Restaurant Info Modal */}
+
+
+
       {showRestaurantInfoModal && restaurantInfo ? (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
@@ -3864,7 +4009,12 @@ updateRestaurantInfo({
   phone: String(formData.get('phone') ?? ''),
   email: String(formData.get('email') ?? ''),
   address: String(formData.get('address') ?? ''),
-  coordinates: String(formData.get('coordinates') ?? '')
+  coordinates: String(formData.get('coordinates') ?? ''),
+
+  // NEW social fields (defaults to '' or null)
+  facebook_url: (String(formData.get('facebook_url') ?? '')).trim() || null,
+  instagram_url: (String(formData.get('instagram_url') ?? '')).trim() || null,
+  tiktok_url: (String(formData.get('tiktok_url') ?? '')).trim() || null
 });
 
 
@@ -3890,7 +4040,6 @@ updateRestaurantInfo({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
@@ -3921,6 +4070,52 @@ updateRestaurantInfo({
                   required
                 />
               </div>
+
+
+
+
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Facebook URL</label>
+  <input
+    type="url"
+    name="facebook_url"
+    defaultValue={restaurantInfo?.facebook_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://facebook.com/yourpage"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Instagram URL</label>
+  <input
+    type="url"
+    name="instagram_url"
+    defaultValue={restaurantInfo?.instagram_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://instagram.com/yourhandle"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">TikTok URL</label>
+  <input
+    type="url"
+    name="tiktok_url"
+    defaultValue={restaurantInfo?.tiktok_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://tiktok.com/@yourhandle"
+  />
+</div>
+
+
+
+
+
+
+
+
+
               <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
