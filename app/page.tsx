@@ -632,7 +632,7 @@ enriched.sort((a: any, b: any) => {
         <div className="container mx-auto px-4 text-center">
           <h1 className="text-5xl md:text-6xl font-bold mb-6">Authentic Newari Cuisine</h1>
           <p className="text-xl md:text-2xl mb-8 max-w-2xl mx-auto">
-  Experience traditional flavors at {restaurant_info?.name ?? 'Our Restaurant'} in the heart of Pokhara
+  Experience traditional flavors at {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'} in the heart of Pokhara
 </p>
 
 
@@ -1111,7 +1111,7 @@ enriched.sort((a: any, b: any) => {
                 <div className="flex items-start space-x-3">
                   <i className="ri-restaurant-line text-xl text-orange-600 mt-1"></i>
                   <div>
-                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Our Restaurant'}</p>
+                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</p>
                     <p className="text-gray-600">Authentic Newari cuisine in Pokhara</p>
                   </div>
                 </div>
@@ -1198,7 +1198,7 @@ enriched.sort((a: any, b: any) => {
                 <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
                   <i className="ri-restaurant-line text-white text-lg"></i>
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400"> {restaurant_info?.name ?? 'Our Restaurant'}</span>
+                <span className="font-['Pacifico'] text-xl text-orange-400"> {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</span>
               </div>
               <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
             </div>
@@ -1329,7 +1329,7 @@ enriched.sort((a: any, b: any) => {
           </div>
 
 <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-  <p>&copy; 2024 {restaurant_info?.name ?? 'Our Restaurant'}. All rights reserved.</p>
+  <p>&copy; 2024 {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}. All rights reserved.</p>
 </div>
         </div>
       </footer>
