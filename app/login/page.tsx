@@ -309,7 +309,6 @@ const { data: profileRow, error: profileErr } = await supabase
 
 
 
-
         </div>
       </div>
     </div>
