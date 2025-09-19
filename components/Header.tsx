@@ -133,7 +133,7 @@ useEffect(() => {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/" className="text-2xl font-['Pacifico'] text-orange-600 cursor-pointer">
-             {restaurant_info?.name ?? 'Our Restaurant'}
+             {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}
           </Link>
 
           {/* Desktop Navigation */}
