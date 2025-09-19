@@ -181,6 +181,9 @@ const categoryIconMap = useMemo(() => {
         Object.entries(next).map(([k, v]) => [Number(k), v])
       ) as { [key: number]: number };
       saveCart(normalized);
+
+
+
     } catch (e) {
       console.warn('Error updating cart', e);
       // fallback to state-only update
@@ -226,6 +229,36 @@ const categoryIconMap = useMemo(() => {
       });
     }
   };
+
+
+// normalize URL from DB: return null if empty or unsafe, prepend https:// if protocol missing
+const normalizeUrl = (raw?: string | null): string | null => {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // disallow javascript: and other unsafe schemes
+  const unsafe = /^\s*javascript:/i;
+  if (unsafe.test(s)) return null;
+
+  // allow tel: and mailto: as-is
+  if (/^(tel:|mailto:)/i.test(s)) return s;
+
+  // if already with protocol, keep it
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // if starts with // (protocol-relative) prepend https:
+  if (/^\/\//.test(s)) return `https:${s}`;
+
+  // otherwise, assume missing protocol and add https://
+  return `https://${s}`;
+};
+
+
+
+
+
+
 
   const getTotalItems = () => {
     return Object.values(cartItems).reduce((sum, qty) => sum + (qty as number), 0);
@@ -1217,14 +1250,81 @@ enriched.sort((a: any, b: any) => {
             </div>
             <div>
               <h4 className="text-lg font-semibold mb-4">Follow Us</h4>
-              <div className="flex space-x-4">
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-facebook-fill text-white"></i>
-                </a>
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-instagram-line text-white"></i>
-                </a>
-              </div>
+             
+
+
+
+
+
+
+<div className="flex space-x-4">
+  {/* Facebook */}
+  {normalizeUrl(restaurant_info?.facebook_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.facebook_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Facebook"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-facebook-fill text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="Facebook not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-facebook-fill"></i>
+    </span>
+  )}
+
+  {/* Instagram */}
+  {normalizeUrl(restaurant_info?.instagram_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.instagram_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Instagram"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-instagram-line text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="Instagram not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-instagram-line"></i>
+    </span>
+  )}
+
+  {/* TikTok */}
+  {normalizeUrl(restaurant_info?.tiktok_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.tiktok_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="TikTok"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-tiktok-line text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="TikTok not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-tiktok-line"></i>
+    </span>
+  )}
+</div>
+
+
+
+
             </div>
           </div>
 
