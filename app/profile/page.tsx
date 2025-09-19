@@ -381,47 +381,80 @@ const fetchOrdersForUser = async (userId: string | null) => {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  
 
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      showErrorMessage('New passwords do not match');
-      return;
+
+
+
+
+const handleChangePassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (passwordData.newPassword !== passwordData.confirmPassword) {
+    showErrorMessage('New passwords do not match');
+    return;
+  }
+  if (passwordData.newPassword.length < 8) {
+    showErrorMessage('Password must be at least 8 characters long');
+    return;
+  }
+
+  const email = userData?.email;
+  if (!email) {
+    showErrorMessage('Unable to identify current user. Please log in again.');
+    return;
+  }
+
+  try {
+    // 1️⃣ Re-authenticate with current password
+    const signInRes = await supabase.auth.signInWithPassword({
+      email,
+      password: passwordData.currentPassword,
+    });
+
+    if (signInRes.error) throw signInRes.error;
+
+    // 2️⃣ Update password
+    const updateRes = await supabase.auth.updateUser({
+      password: passwordData.newPassword,
+    });
+
+    if (updateRes.error) throw updateRes.error;
+
+    // 3️⃣ Force logout
+    await supabase.auth.signOut();
+    localStorage.clear();
+
+    // reset UI
+    setIsChangingPassword(false);
+    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+
+    showSuccessMessage('Password changed successfully! Please log in again.');
+
+    // redirect to login page
+    router.push('/login');
+  } catch (err: any) {
+    console.error('Password change error:', err);
+    if (
+      err?.status === 401 ||
+      err?.message?.toLowerCase().includes('invalid login') ||
+      err?.message?.toLowerCase().includes('invalid password')
+    ) {
+      showErrorMessage('Current password is incorrect');
+    } else {
+      showErrorMessage(err?.message || 'Failed to change password. Please try again.');
     }
+  }
+};
 
-    if (passwordData.newPassword.length < 8) {
-      showErrorMessage('Password must be at least 8 characters long');
-      return;
-    }
 
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/user-profile-service`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({
-          action: 'changePassword',
-          currentPassword: passwordData.currentPassword,
-          newPassword: passwordData.newPassword
-        })
-      });
 
-      const result = await response.json();
 
-      if (result.success) {
-        setIsChangingPassword(false);
-        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        showSuccessMessage('Password changed successfully!');
-      } else {
-        throw new Error(result.error || 'Failed to change password');
-      }
-    } catch (error) {
-      console.error('Password change error:', error);
-      showErrorMessage('Failed to change password. Please try again.');
-    }
-  };
+
+
+
+
+
 
   const handleProfilePictureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -466,33 +499,102 @@ const fetchOrdersForUser = async (userId: string | null) => {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    if (!confirm('Are you sure you want to delete (deactivate) your account? This action can be undone by admin.')) return;
+// add at top of component state
+const [isDeleting, setIsDeleting] = useState(false);
 
+// replace existing handler with this:
+const handleDeleteAccount = async () => {
+  if (!confirm('Are you sure you want to permanently delete your account? This action cannot be undone.')) return;
+
+  setIsDeleting(true);
+  try {
+    // 1) determine user id (auth user preferred, fallback to userData)
+    const { data: userResp, error: userErr } = await supabase.auth.getUser();
+    if (userErr) console.warn('supabase.auth.getUser() warning:', userErr);
+
+    const userId = (userResp as any)?.user?.id ?? userData?.id ?? null;
+    if (!userId) throw new Error('Unable to determine user id. Are you logged in?');
+
+    // 2) get session/access token (support different supabase-js shapes)
+    const { data: sessionResp, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr) console.warn('supabase.auth.getSession() warning:', sessionErr);
+
+    // typical shape: { data: { session } }
+    // session may have .access_token or .accessToken depending on SDK version
+    let accessToken: string | null = null;
     try {
-      const targetEmail = userData?.email;
-      if (!targetEmail) throw new Error('No user email available');
-
-      const { error } = await supabase
-        .from('users')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq('email', targetEmail);
-
-      if (error) throw error;
-
-      localStorage.clear();
-      try {
-        await supabase.auth.signOut();
-      } catch (e) {
-        // ignore
-      }
-      router.push('/');
-    } catch (error) {
-      console.error('Account deletion error (Supabase):', error);
-      localStorage.clear();
-      router.push('/');
+      // try nested shapes
+      accessToken = (sessionResp as any)?.session?.access_token
+        || (sessionResp as any)?.session?.accessToken
+        || (sessionResp as any)?.data?.session?.access_token
+        || (sessionResp as any)?.data?.session?.accessToken
+        || null;
+    } catch (e) {
+      accessToken = null;
     }
-  };
+
+    // Last resort: try reading from localStorage (not ideal but sometimes present)
+    if (!accessToken) {
+      const ls = localStorage.getItem('supabase.auth.token') || localStorage.getItem('sb-access-token') || null;
+      if (ls) accessToken = ls;
+    }
+
+    if (!accessToken) {
+      console.error('No access token found for current session. Server route requires a bearer token.');
+      // Option: we can still call server route without token if route uses other auth — but we expect token
+      throw new Error('Missing session token. Please sign in again.');
+    }
+
+    // 3) call the secure server route (app/api/delete-account/route.ts)
+    const res = await fetch('/api/delete-account', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({ userId })
+    });
+
+    const body = await res.json();
+    if (!res.ok || body?.error) {
+      console.error('Server responded with error:', res.status, body);
+      throw new Error(body?.error || body?.message || 'Server failed to delete account');
+    }
+
+    // 4) successfully deleted/deactivated on server — sign out client, cleanup
+    try { await supabase.auth.signOut(); } catch (e) { console.warn('supabase.auth.signOut() error:', e); }
+    try { localStorage.clear(); } catch (e) { /* ignore */ }
+
+    showSuccessMessage('Account deleted successfully.');
+    router.push('/');
+  } catch (err: any) {
+    console.error('handleDeleteAccount error:', err);
+    showErrorMessage(err?.message ?? 'Failed to delete account. Try logging in again.');
+  } finally {
+    setIsDeleting(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
 
   const showSuccessMessage = (message: string) => {
     const toast = document.createElement('div');
@@ -1054,6 +1156,15 @@ const fetchOrdersForUser = async (userId: string | null) => {
                       </div>
                     </form>
                   )}
+
+
+
+
+
+
+
+
+
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-6">
