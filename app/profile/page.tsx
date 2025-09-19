@@ -976,15 +976,8 @@ const handleDeleteAccount = async () => {
                     </div>
                   </div>
 
-                  <div className="col-span-3 mt-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
-                    <input type="text" value={userData?.role ?? ''} disabled className="w-full p-3 border rounded" />
-                  </div>
 
-                  <div className="col-span-3 mt-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">User Type</label>
-                    <input type="text" value={userData?.user_type ?? ''} disabled className="w-full p-3 border rounded" />
-                  </div>
+
                 </div>
               )}
             </div>
