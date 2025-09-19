@@ -351,39 +351,152 @@ const categoryIconMap = useMemo(() => {
     setSearchResults(results);
   }, [searchTerm, menuItems]);
 
-  const loadMenuData = async () => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({ action: 'getMenuData' })
+
+
+
+
+
+
+
+
+
+const parseTimeSafe = (v: any): number => {
+  if (!v && v !== 0) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const asNum = Number(v);
+    if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+    const asDate = Date.parse(v);
+    if (!Number.isNaN(asDate)) return asDate;
+    return 0;
+  }
+  try {
+    const cast = new Date(v as any).getTime();
+    return Number.isNaN(cast) ? 0 : cast;
+  } catch {
+    return 0;
+  }
+};
+
+const deriveFlagsForItem = (item: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+  const createdRaw = item.created_at ?? null;
+  const updatedRaw = item.updated_at ?? null;
+
+  const created = parseTimeSafe(createdRaw);
+  const updated = parseTimeSafe(updatedRaw);
+
+  const isEdited = typeof item.isEdited === 'boolean'
+    ? !!item.isEdited
+    : (updated > 0 && created > 0 && updated !== created);
+
+  const isNew = typeof item.isNew === 'boolean'
+    ? !!item.isNew
+    : (created > 0 && (now - created) <= newThresholdMs);
+
+  const lastChanged = Math.max(created || 0, updated || 0);
+
+  return { created, updated, isEdited, isNew, lastChanged };
+};
+
+const loadMenuData = async () => {
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({ action: 'getMenuData' })
+    });
+
+    const data = await response.json();
+
+    // DEBUG (optional): console.debug('admin-menu-service returned menuItems sample:', (data?.menuItems || []).slice(0,5));
+
+    if (data.success) {
+      const items = Array.isArray(data.menuItems) ? data.menuItems : [];
+
+      const categoriesWithCounts = (data.categories || []).map((cat: any) => ({
+        ...cat,
+        count: items.filter((item: any) => item.category_id === cat.id).length
+      }));
+      setCategories(categoriesWithCounts);
+
+      const now = Date.now();
+      const NEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+      const enriched = items.map((it: any) => {
+        const meta = deriveFlagsForItem(it, now, NEW_THRESHOLD_MS);
+        return { ...it, __meta: meta };
       });
 
-      const data = await response.json();
-      if (data.success) {
-        const categoriesWithCounts = data.categories.map((cat: any) => ({
-          ...cat,
-          count: data.menuItems.filter((item: any) => item.category_id === cat.id).length
-        }));
-        setCategories(categoriesWithCounts);
-        setFeaturedItems(data.menuItems.slice(0, 3));
-        setMenuItems(data.menuItems);
+// Robust comparator: priority (new/edited) first, then lastChanged desc (newest first)
+enriched.sort((a: any, b: any) => {
+  const A = a.__meta ?? {};
+  const B = b.__meta ?? {};
 
-        // cache full menu for price lookup across pages & for search
-        try {
-          localStorage.setItem('menuItems', JSON.stringify(data.menuItems));
-        } catch (e) {
-          console.warn('Unable to cache menu items', e);
-        }
+  const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+  const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+  if (aPriority !== bPriority) return bPriority - aPriority; // higher priority first
+
+  // numeric compare of lastChanged (descending -> newest first)
+  const aLast = Number(A.lastChanged || 0);
+  const bLast = Number(B.lastChanged || 0);
+  if (bLast !== aLast) return bLast - aLast;
+
+  // fallback to created timestamp (descending)
+  const aCreated = Number(A.created || 0);
+  const bCreated = Number(B.created || 0);
+  if (bCreated !== aCreated) return bCreated - aCreated;
+
+  // final deterministic fallback: id descending (so higher id (newer) comes first)
+  // if your ids are numeric use numeric compare:
+  const aIdNum = Number(a.id);
+  const bIdNum = Number(b.id);
+  if (!Number.isNaN(aIdNum) && !Number.isNaN(bIdNum)) {
+    return bIdNum - aIdNum;
+  }
+  // otherwise string locale compare (ascending), but invert to get newest first
+  return String(b.id || '').localeCompare(String(a.id || ''));
+});
+
+
+
+
+
+
+      setFeaturedItems(enriched.slice(0, 3).map((i: any) => i));
+      setMenuItems(enriched.map((i: any) => i));
+
+      try {
+        localStorage.setItem('menuItems', JSON.stringify(enriched));
+      } catch (e) {
+        console.warn('Unable to cache menu items', e);
       }
-    } catch (error) {
-      console.error('Error loading menu data from database:', error);
+    } else {
+      console.warn('admin-menu-service returned success=false', data);
     }
+  } catch (error) {
+    console.error('Error loading menu data from database:', error);
+  } finally {
     setLoading(false);
-  };
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
 
   const loadReviews = async () => {
     try {
@@ -684,63 +797,81 @@ const categoryIconMap = useMemo(() => {
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
-              {featuredItems.map((item) => (
-                <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="aspect-video relative">
-                    <img
-                      src={item.image_url || item.image}
-                      alt={item.name}
-                      loading="lazy"
-                      className="w-full h-full object-cover object-top"
-                    />
-                  </div>
+             
+             
+{featuredItems.map((item) => {
+  const meta = item.__meta || {};
+  const isNew = !!meta.isNew;
+  const isEdited = !!meta.isEdited;
 
-                  <div className="p-6">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
-                      <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
-                    </div>
+  return (
+    <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative">
+      <div className="aspect-video relative">
+        <img
+          src={item.image_url || item.image}
+          alt={item.name}
+          loading="lazy"
+          className="w-full h-full object-cover object-top"
+        />
 
-                    <p className="text-gray-600 mb-4">{item.description}</p>
+        {/* Badges in top-left */}
+        <div className="absolute top-3 left-3 flex gap-2">
+          {isNew && <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">NEW</span>}
+          {isEdited && <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">EDITED</span>}
+        </div>
+      </div>
 
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-                        {item.category?.name || item.category}
-                      </span>
+      <div className="p-6">
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
+          <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
+        </div>
 
-                      {cartItems[item.id] ? (
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => {
-                              const newQty = Math.max(0, (cartItems[item.id] || 0) - 1);
-                              updateQuantity(item.id, newQty);
-                            }}
-                            className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
-                          >
-                            <i className="ri-subtract-line"></i>
-                          </button>
+        <p className="text-gray-600 mb-4">{item.description}</p>
 
-                          <span className="font-semibold text-lg">{cartItems[item.id]}</span>
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+            {item.category?.name || item.category}
+          </span>
 
-                          <button
-                            onClick={() => addToCart(item.id, 1)}
-                            className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
-                          >
-                            <i className="ri-add-line"></i>
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => addToCart(item.id, 1)}
-                          className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          Add to Cart
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+          {cartItems[item.id] ? (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  const newQty = Math.max(0, (cartItems[item.id] || 0) - 1);
+                  updateQuantity(item.id, newQty);
+                }}
+                className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
+              >
+                <i className="ri-subtract-line"></i>
+              </button>
+
+              <span className="font-semibold text-lg">{cartItems[item.id]}</span>
+
+              <button
+                onClick={() => addToCart(item.id, 1)}
+                className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
+              >
+                <i className="ri-add-line"></i>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => addToCart(item.id, 1)}
+              className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Add to Cart
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+})}
+
+
+
+
             </div>
           )}
 
