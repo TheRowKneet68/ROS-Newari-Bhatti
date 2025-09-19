@@ -142,11 +142,25 @@ const handleSubmit = async (e: React.FormEvent) => {
     // 3) Fallback: canonical profiles table (server-controlled)
     if (!userRole) {
       try {
-        const { data: profileRow, error: profileErr } = await supabase
-          .from('profiles') // adjust to 'users' if you store role there
-          .select('role, user_type')
-          .eq('id', user.id)
-          .maybeSingle();
+        // const { data: profileRow, error: profileErr } = await supabase
+        //   .from('profiles') // adjust to 'users' if you store role there
+        //   .select('role, user_type')
+        //   .eq('id', user.id)
+        //   .maybeSingle();
+
+
+
+
+
+const { data: profileRow, error: profileErr } = await supabase
+  .from('users')
+  .select('role, user_type')
+  .eq('id', user.id)
+  .maybeSingle();
+
+
+
+
 
         if (!profileErr && profileRow) {
           userRole = profileRow.role ?? profileRow.user_type ?? null;
