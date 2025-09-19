@@ -70,21 +70,37 @@ const handleResetPassword = async (e?: React.FormEvent) => {
 
   setForgotLoading(true);
   try {
-    const redirectTo = process.env.NEXT_PUBLIC_PASSWORD_RESET_REDIRECT || undefined;
+    // pick redirect from env (must be set to your /reset-password page)
+    const redirectTo = (process.env.NEXT_PUBLIC_PASSWORD_RESET_REDIRECT || '').trim() || undefined;
+    console.debug('Reset password redirectTo=', redirectTo);
 
-    // supabase-js v2
-    const { data, error } = await supabase.auth.resetPasswordForEmail(emailToSend, redirectTo ? { redirectTo } : {});
-    if (error) throw error;
+    // Try supabase-js v2 API first
+    if (typeof (supabase.auth as any).resetPasswordForEmail === 'function') {
+      const { data, error } = await (supabase.auth as any).resetPasswordForEmail(emailToSend, redirectTo ? { redirectTo } : {});
+      if (error) throw error;
+      // data is not very useful here; we keep neutral success message below
+    } else if ((supabase as any).auth && (supabase as any).auth.api && typeof (supabase as any).auth.api.resetPasswordForEmail === 'function') {
+      // legacy client fallback
+      const { data, error } = await (supabase as any).auth.api.resetPasswordForEmail(emailToSend, redirectTo);
+      if (error) throw error;
+    } else {
+      throw new Error('Supabase client does not expose resetPasswordForEmail. Ensure you use a supported supabase-js version.');
+    }
 
+    // Always show neutral message (don't reveal account existence)
     setForgotMsg('If an account exists for that email, a password reset link has been sent. Check your email (including spam).');
     setForgotEmail('');
   } catch (err: any) {
     console.error('Reset password error', err);
-    setForgotError(err?.message ?? 'Failed to send reset email. Please try again later.');
+    // Some Supabase errors come as string or object with message
+    const message = typeof err === 'string' ? err : (err?.message ?? String(err));
+    // Show friendly message but include underlying reason for debugging in console
+    setForgotError(message || 'Failed to send reset email. Please try again later.');
   } finally {
     setForgotLoading(false);
   }
 };
+
 
 
 
