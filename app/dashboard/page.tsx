@@ -1,404 +1,1083 @@
-// app/page.tsx
+
 'use client';
 
-import { useMemo } from 'react';
-import Header from '../components/Header';
+import Header from '../../components/Header';
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
-import ReviewForm from '../components/ReviewForm';
-import { useRouter } from 'next/navigation';
+import React from 'react';
+import { useState, useEffect } from 'react';
+import OrderModal from './OrderModal';
 import { createClient } from '@supabase/supabase-js';
+import { useRef } from 'react';
 
 
 
-import ContactForm from '../components/ContactForm';
-import QuestionForm from '../components/QuestionForm';
-import ViewQuestions from '../components/ViewQuestions';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-export default function Home() {
-  const router = useRouter();
+// right after const supabase = createClient(...)
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  window.sup = supabase;
+  // debug: print URL and anon key presence (DO NOT log secret service_role anywhere)
+  console.log('SUPABASE URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log('SUPABASE ANON KEY present?', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+}
 
-  const [cartItems, setCartItems] = useState<{ [key: number]: number }>({});
-  const [menuItems, setMenuItems] = useState<any[]>([]);
-  const [reviews, setReviews] = useState<any[]>([]);
+
+export default function DashboardPage() {
+  const [userQuestions, setUserQuestions] = useState<any[]>([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
+  const BUCKETNAME = 'menu-images';
+
+  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
+
+  const [error, setError] = useState<string | null>(null);
+
+
+
+  const lastOrderCountRef = useRef<number | null>(null);
+  const pollIntervalRef = useRef<number | null>(null);
+  const lastCancelledCountRef = useRef<number | null>(null);
+
+  // audio refs for beep
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const chirpTimeoutRef = useRef<number | null>(null);
+  const chirpIntervalRef = useRef<number | null>(null);
+  const beepOscRef = useRef<OscillatorNode | null>(null);
+  const beepGainRef = useRef<GainNode | null>(null);
+  const beepTimeoutRef = useRef<number | null>(null);
+  const unlockedRef = useRef(false);
+
+  
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+
+  const [cancelledOrders, setCancelledOrders] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
+  const [sortBy, setSortBy] = useState<'date' | 'status' | 'total'>('date');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+
   const [userType, setUserType] = useState('');
-const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [activeOrders, setActiveOrders] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<any>(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [showOwnerPanel, setShowOwnerPanel] = useState(false);
+  const [showRestaurantInfoModal, setShowRestaurantInfoModal] = useState(false);
 
-// ---------- Restaurant info (load from server) ----------
-// const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
-const [restaurantLoading, setRestaurantLoading] = useState(true);
-const [restaurantError, setRestaurantError] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [showEditItemModal, setShowEditItemModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
 
-// ---------- Restaurant info (load from Supabase directly) ----------
+
+
+
+// Admin management state & UI flags
+const [loadingAdmins, setLoadingAdmins] = useState<boolean>(true);
+const [operationError, setOperationError] = useState<string | null>(null);
+const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+const [editingAdmin, setEditingAdmin] = useState<any | null>(null);
+
+
+
+
+
+
+// image upload states
+const [pickedFile, setPickedFile] = useState<File | null>(null);
+const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+const [uploading, setUploading] = useState(false);
+const [uploadError, setUploadError] = useState<string | null>(null);
+const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+const [uploadingImage, setUploadingImage] = useState(false);
+const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+
+
+const [restaurantInfo, setRestaurantInfo] = useState({
+  name: 'Newari Bhatti and Kathmandu Momo Ghar',
+  phone: '+977-9829117277',
+  email: 'info@newaribhatti.com',
+  address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
+  coordinates: '28.22886241546525, 83.99098268394296'
+});
+const [restaurantLoading, setRestaurantLoading] = useState(false);
+
+
+
+
+
+  // ----- Image upload states & helpers -----
+// Add these to your existing useState declarations
+
+/**
+ * Compress a File to JPEG via canvas.
+ * quality between 0.0 - 1.0 (lower => smaller). We use low values for minimal size.
+ */
+
+
+
+
+// helper to create a unique filename
+const makeFilename = (originalName: string) => {
+  const ext = originalName.split('.').pop() ?? 'jpg';
+  const name = originalName.replace(/\.[^/.]+$/, '');
+  return `${name}_${Date.now()}.${ext}`;
+};
+
+
+
+
+
+// call this from your input onChange or wherever you handle upload
+async function uploadImageFile(file: File, userId?: string) {
+  if (!file) throw new Error('No file provided');
+
+  // debug: inspect file
+  console.log('Uploading file:', file.name, file.size, file.type);
+
+
+  const folder = userId ? `users/${userId}` : 'uploads';
+  const filename = makeFilename(file.name);
+  const path = `${folder}/${filename}`; // no leading slash
+
+  try {
+    // Use upsert: true if you want overwrites, otherwise false to prevent accidental overwrite.
+    const { data, error: uploadError } = await supabase.storage
+      .from(BUCKETNAME)
+      .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
+
+    if (uploadError) {
+      console.log('Upload error:', uploadError);
+      return { success: false, error: uploadError };
+    }
+
+    console.log('Upload success', data);
+
+    // Get a public URL (if bucket is public)
+    const { data: publicData } = supabase.storage.from(BUCKETNAME).getPublicUrl(path);
+    const publicUrl = publicData?.publicUrl ?? null;
+    console.log('Public URL:', publicUrl);
+
+    // If bucket is private and you need a signed URL:
+    // const { data: signedData, error: signedError } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+    // then use signedData.signedUrl
+
+    return { success: true, path, publicUrl };
+  } catch (err) {
+    console.log('Unexpected upload exception', err);
+    return { success: false, error: err };
+  }
+}
+
+
+// proper React input change handler
+
+
+const loadUserQuestions = async () => {
+  setLoadingQuestions(true);
+  try {
+    const { data, error } = await supabase
+      .from('user_questions')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading questions:', error);
+      setUserQuestions([]);
+    } else {
+      setUserQuestions(data ?? []);
+    }
+  } finally {
+    setLoadingQuestions(false);
+  }
+};
+
+// whenever editingAdmin changes or modal opens, populate (or clear) the form
 useEffect(() => {
-  let mounted = true;
-
-  async function loadFromSupabase() {
+  loadUserQuestions();
+  (async () => {
     try {
-      setRestaurantLoading(true);
-      setRestaurantError(null);
+      await fetchAdmins();
+    } catch (err) {
+      console.error("useEffect fetchAdmins failed:", err);
+    }
+  })();
+}, []);
 
-      // Fetch the latest restaurant_info row (order by updated_at desc, limit 1)
-      const { data, error, status } = await supabase
-        .from('restaurant_info')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(1);
 
-      if (error && status !== 406) {
-        // 406 can happen for empty result depending on settings; still handle it
-        throw error;
+
+
+
+const askQuestion = async (questionText: string) => {
+  try {
+    const { error } = await supabase
+      .from('user_questions')
+      .insert([{ question: questionText }]);
+
+    if (error) {
+      console.error('Error asking question:', error);
+      alert('Could not send your question.');
+    } else {
+      alert('Your question has been submitted!');
+      loadUserQuestions();
+    }
+  } catch (err) {
+    console.error('Unexpected error asking question:', err);
+  }
+};
+
+
+
+
+
+
+const replyToQuestion = async (id: number, answerText: string) => {
+  try {
+    const { error } = await supabase
+      .from('user_questions')
+      .update({
+        answer: answerText,
+        is_answered: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error replying to question:', error);
+      alert('Could not reply.');
+    } else {
+      loadUserQuestions();
+    }
+  } catch (err) {
+    console.error('Unexpected error replying:', err);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    console.log('[handleFileInputChange] called');
+    const file = e.target.files?.[0] ?? null;
+    if (!file) {
+      setPickedFile(null);
+      setPreviewUrl(null);
+      return;
+    }
+    setPickedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setUploadError(null);
+    setUploadedImageUrl(null);
+
+    try {
+      setUploading(true);
+      const compressed = await compressImageFile(file, 0.45, 1400).catch(() => file as any);
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+      if (!res.success) {
+        console.error('[auto upload] failed', res.error);
+        setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+        return;
       }
-
-      if (mounted) {
-        // If no rows, data will be [] — set null so UI falls back to placeholders
-        const row = Array.isArray(data) && data.length ? data[0] : null;
-        setrestaurant_info(row);
-      }
-    } catch (err: any) {
-      console.error('Failed to load restaurant_info from Supabase:', err);
-      if (mounted) setRestaurantError(err?.message ?? 'Failed to load restaurant info');
+      setUploadedImageUrl(res.publicUrl || null);
+      console.log('[auto upload] done', res);
+    } catch (err) {
+      console.error('[auto upload] exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
     } finally {
-      if (mounted) setRestaurantLoading(false);
+      setUploading(false);
+    }
+  };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// small helper to call from code if you ever want to pass a File directly
+const handleFileSelectFromFile = (f?: File | null) => {
+  const file = f ?? null;
+  if (!file) {
+    setPickedFile(null);
+    setPreviewUrl(null);
+    return;
+  }
+  setPickedFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setUploadedImageUrl(null);
+  setUploadError(null);
+};
+
+
+// 1) compressImageFile - single, robust implementation
+async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): Promise<Blob> {
+  if (typeof window === 'undefined') return file;
+  if (!file || !file.type?.startsWith?.('image/')) return file;
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load error')); };
+    image.src = url;
+  });
+
+  const ratio = Math.min(1, maxWidth / img.width);
+  const width = Math.round(img.width * ratio);
+  const height = Math.round(img.height * ratio);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas not supported');
+
+  ctx.drawImage(img, 0, 0, width, height);
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('Canvas toBlob returned null'));
+      resolve(blob);
+    }, 'image/jpeg', quality);
+  });
+}
+
+
+
+
+
+
+
+
+
+
+
+const handleFileSelect = (f?: File | null) => {
+  const file = f ?? fileInputRef.current?.files?.[0] ?? null;
+  if (!file) { setPickedFile(null); setPreviewUrl(null); return; }
+  setPickedFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setUploadedImageUrl(null);
+  setUploadError(null);
+};
+
+
+
+
+
+
+  async function uploadCompressedImageToSupabaseSafe(
+    supClient: ReturnType<typeof createClient>,
+    bucket: string,
+    blob: Blob,
+    prefix = 'img'
+  ): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
+    console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blob.size });
+    if (!supClient) return { success: false, error: 'Supabase client missing' };
+    if (!bucket) return { success: false, error: 'Bucket name missing' };
+
+    try {
+      const filename = `${prefix}-${makeFilename('upload')}`;
+      const uploadBlob = blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' });
+
+      const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
+        contentType: 'image/jpeg',
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+      if (error) {
+        console.log('[Supabase upload] error', error);
+        return { success: false, error };
+      }
+      console.log('[Supabase upload] success', data);
+
+      const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
+      if (urlResult?.error) {
+        console.warn('[Supabase getPublicUrl] error', urlResult.error);
+        return { success: true, publicUrl: null, path: data.path };
+      }
+
+      const publicUrl = urlResult?.data?.publicUrl ?? null;
+      console.log('[Supabase publicUrl]', publicUrl);
+
+      return { success: true, publicUrl, path: data.path };
+    } catch (err) {
+      console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
+      return { success: false, error: err };
     }
   }
 
-  loadFromSupabase();
-
-  return () => {
-    mounted = false;
-  };
-}, []); // run once on mount
-// ---------------------------------------------------------
-
-
-// ---------------------------------------------------------
-
-
-  const [featuredItems, setFeaturedItems] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // New: filter state used for the review widgets on home
-  const [filterRating, setFilterRating] = useState<number | 'all'>('all');
-
-  // search state (home)
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const searchRef = useRef<HTMLDivElement | null>(null);
-
-  // ---------- Skeleton helpers (UI-only) ----------
-  const SkeletonCategory = () => (
-    <div className="flex flex-col items-center">
-      <div className="w-16 h-16 bg-gray-200 rounded-full mb-3" />
-      <div className="w-24 h-4 bg-gray-200 rounded-full" />
-    </div>
-  );
-
-  const SkeletonCard = () => (
-    <div className="bg-white rounded-2xl p-4 shadow-sm">
-      <div className="aspect-video bg-gray-200 rounded-md mb-4" />
-      <div className="h-5 bg-gray-200 rounded w-3/4 mb-2" />
-      <div className="h-4 bg-gray-200 rounded w-1/2 mb-3" />
-      <div className="flex justify-between items-center">
-        <div className="h-8 w-20 bg-gray-200 rounded-full" />
-        <div className="h-8 w-20 bg-gray-200 rounded-full" />
-      </div>
-    </div>
-  );
 
 
 
 
 
-const BUCKETNAME = 'menu-images'; // adjust if your bucket name differs
 
-// resolve icon URLs for categories (memoized)
-const categoryIconMap = useMemo(() => {
-  const map: Record<string, string | null> = {};
-  (categories || []).forEach((cat: any) => {
-    const raw = (cat.icon ?? cat.icon_url ?? '') as string;
-    if (!raw) {
-      map[cat.id] = null;
+  const debugUploadRaw = async () => {
+    if (!pickedFile) {
+      setUploadError('No file selected');
       return;
     }
-    // data URI or absolute URL -> use directly
-    if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://')) {
-      map[cat.id] = raw;
-      return;
-    }
-    // otherwise treat as storage path/filename inside BUCKETNAME
-    let path = raw;
-    if (path.startsWith(`${BUCKETNAME}/`)) path = path.replace(`${BUCKETNAME}/`, '');
-    if (path.startsWith('/')) path = path.slice(1);
     try {
-      const { data } = supabase.storage.from(BUCKETNAME).getPublicUrl(path);
-      map[cat.id] = data?.publicUrl ?? null;
+      console.log('debugUploadRaw: file', pickedFile.name, pickedFile.size);
+      const fname = `ui-upload-${Date.now()}-${pickedFile.name.replace(/\s+/g, '_')}`;
+      const { data, error } = await supabase.storage.from(BUCKETNAME).upload(fname, pickedFile, { upsert: false });
+      console.log('debugUploadRaw result', { data, error });
+      if (error) {
+        setUploadError(error.message || JSON.stringify(error));
+        return;
+      }
+      const url = await supabase.storage.from(BUCKETNAME).getPublicUrl(data.path);
+      setUploadedImageUrl(url?.data?.publicUrl ?? null);
     } catch (err) {
-      console.warn('getPublicUrl error for', path, err);
-      map[cat.id] = null;
+      console.error('debugUploadRaw exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
     }
-  });
-  return map;
-}, [categories, supabase]);
-
-
-
-
-
-
-
-  const SkeletonReview = () => (
-    <div className="bg-gray-200 rounded-2xl h-40 p-4" />
-  );
-  // ---------- end skeleton helpers ----------
-
-  // ---------- unified cart helpers ----------
-  const saveCart = (cartObj: { [key: number]: number }) => {
-    try {
-      localStorage.setItem('cartItems', JSON.stringify(cartObj));
-    } catch (e) {
-      console.warn('Could not save cart to localStorage', e);
-    }
-    setCartItems(cartObj);
   };
 
-  const addToCart = (itemId: number, qty = 1) => {
+
+
+
+
+
+
+  const handleUpload = async () => {
+    if (!pickedFile) return setUploadError('Select a file first');
+    setUploading(true);
+    setUploadError(null);
     try {
-      const currentCartRaw = localStorage.getItem('cartItems') || '{}';
-      const currentCartObj = JSON.parse(currentCartRaw || '{}') as { [key: string]: number };
-      const id = String(itemId);
-      const currentQty = Number(currentCartObj[id] || 0);
-      const updatedQty = currentQty + qty;
-      const next = { ...currentCartObj, [id]: updatedQty };
-      // normalize keys to numbers
-      const normalized = Object.fromEntries(
-        Object.entries(next).map(([k, v]) => [Number(k), v])
-      ) as { [key: number]: number };
-      saveCart(normalized);
-    } catch (e) {
-      console.warn('Error updating cart', e);
-      // fallback to state-only update
-      setCartItems(prev => {
-        const next = { ...prev, [itemId]: (prev[itemId] || 0) + qty };
-        try { localStorage.setItem('cartItems', JSON.stringify(next)); } catch {}
-        return next;
+      const compressed = await compressImageFile(pickedFile, 0.35, 1200).catch(() => pickedFile as any);
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+      if (!res.success) {
+        console.error('[handleUpload] upload failed', res.error);
+        setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+        return;
+      }
+      setUploadedImageUrl(res.publicUrl || null);
+    } catch (err) {
+      console.error('[handleUpload] exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
+
+
+
+
+
+
+// 4) optional manual upload button handler (if you prefer manual upload)
+const handleUploadClick = async () => {
+  if (!pickedFile) {
+    setUploadError('No file selected');
+    return;
+  }
+  setUploading(true);
+  setUploadError(null);
+  try {
+    const compressed = await compressImageFile(pickedFile, 0.45, 1400);
+    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+    if (!res.success) {
+      setUploadError(res.error?.message ?? 'Upload failed');
+      return;
+    }
+    setUploadedImageUrl(res.publicUrl || null);
+  } catch (err: any) {
+    console.error('upload error', err);
+    setUploadError(err?.message || 'Upload failed');
+  } finally {
+    setUploading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+useEffect(() => {
+  const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
+  const type = localStorage.getItem('userType') || 'user';
+
+  setIsLoggedIn(loggedIn);
+  setUserType(type);
+
+  if (!(loggedIn && (type === 'admin' || type === 'superadmin'))) {
+    return;
+  }
+
+
+
+const statusColors: Record<string, string> = {
+  placed: "bg-blue-100 text-blue-800",
+  preparing: "bg-yellow-100 text-yellow-800",
+  ready: "bg-green-100 text-green-800",
+  "on-the-way": "bg-purple-100 text-purple-800",
+  completed: "bg-gray-200 text-gray-800",
+  cancelled: "bg-red-100 text-red-800",
+  default: "bg-white text-gray-700"
+};
+
+
+
+
+
+
+
+
+  
+  // ensure audio context exists (kept for compatibility with other audio if needed)
+  const ensureAudioContext = async () => {
+    if (!audioCtxRef.current) {
+      try {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      } catch (e) {
+        console.warn('Could not create AudioContext', e);
+      }
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+  };
+
+  // show small top-right popup for new order
+  const showNewOrderToast = (message = 'New order placed') => {
+    const id = `new-order-toast-${Date.now()}`;
+    const toast = document.createElement('div');
+    toast.id = id;
+    toast.className = 'fixed top-4 right-4 bg-white border border-gray-200 px-4 py-3 rounded-lg shadow-lg z-50 flex items-center space-x-3';
+    toast.innerHTML = `
+      <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+      <div class="text-sm text-gray-800">${message}</div>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(8px)';
+      setTimeout(() => {
+        if (document.body.contains(toast)) document.body.removeChild(toast);
+      }, 7000);
+    }, 7000);
+  };
+
+  // ---- NEW: Play external MP3 for ~5s ----
+  // Uses audioElRef so the <audio> element is reused between events.
+  const NOTIF_AUDIO_SRC = "https://cdn.pixabay.com/audio/2023/10/27/audio_8ab11e07a4.mp3";
+
+  const startNotificationAudioFor5s = async () => {
+    await ensureAudioContext(); // just in case we need it for other audio APIs
+    // If there's already an audio playing - restart timer and replay
+    if (!audioElRef.current) {
+      const audio = new Audio(NOTIF_AUDIO_SRC);
+      audio.preload = 'auto';
+      audioElRef.current = audio;
+      // Some browsers require user gesture; log errors silently
+    }
+
+    const audioEl = audioElRef.current!;
+    // Try to play - modern browsers might block autoplay if no user gesture, so catch errors
+    audioEl.currentTime = 0;
+    const playPromise = audioEl.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise.catch((err) => {
+        // Silently warning: autoplay might be blocked by browser; handle gracefully
+        console.warn("Notification audio play blocked or failed:", err);
       });
     }
+
+    // If already had a timeout, clear it and start new 5s window
+    if (chirpTimeoutRef.current) {
+      clearTimeout(chirpTimeoutRef.current);
+    }
+    // Ensure audio stops after ~5s
+    chirpTimeoutRef.current = window.setTimeout(() => {
+      try {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      } catch (e) {}
+      // cleanup timer
+      if (chirpTimeoutRef.current) {
+        clearTimeout(chirpTimeoutRef.current);
+        chirpTimeoutRef.current = null;
+      }
+    }, 7000);
   };
 
-  const updateQuantity = (itemId: number, newQty: number) => {
-    try {
-      const currentCartRaw = localStorage.getItem('cartItems') || '{}';
-      const currentCartObj = JSON.parse(currentCartRaw || '{}') as { [key: string]: number };
-      const id = String(itemId);
+  const stopNotificationAudio = () => {
+    if (audioElRef.current) {
+      try {
+        audioElRef.current.pause();
+        audioElRef.current.currentTime = 0;
+      } catch (e) {}
+    }
+    if (chirpTimeoutRef.current) {
+      clearTimeout(chirpTimeoutRef.current);
+      chirpTimeoutRef.current = null;
+    }
+  };
+  // ---- end NEW audio replacement ----
 
-      if (newQty <= 0) {
-        const { [id]: _, ...rest } = currentCartObj;
-        const normalized = Object.fromEntries(
-          Object.entries(rest).map(([k, v]) => [Number(k), v])
-        ) as { [key: number]: number };
-        saveCart(normalized);
+  // Upsert order in local state (update or insert)
+  const upsertOrderInState = (order: any) => {
+    setOrders(prev => {
+      const exists = prev.some(o => o.id === order.id);
+      if (exists) {
+        return prev.map(o => (o.id === order.id ? order : o))
+                   .sort((a, b) => new Date(b.created_at || b.orderDate || 0).getTime() - new Date(a.created_at || a.orderDate || 0).getTime());
+      } else {
+        return [order, ...prev].sort((a, b) => new Date(b.created_at || b.orderDate || 0).getTime() - new Date(a.created_at || a.orderDate || 0).getTime());
+      }
+    });
+  };
+
+// Replace your existing markOrderCancelledInState with this:
+const markOrderCancelledInState = (order: any) => {
+  // 1) update UI state immediately
+  setOrders(prev => prev.map(o => (o.id === order.id ? { ...o, status: 'cancelled', ...order } : o)));
+
+  // 2) update cached localStorage copies
+  try {
+    const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+    localStorage.setItem('allOrders', JSON.stringify((allOrders || []).map((o: any) => o.id === order.id ? { ...o, status: 'cancelled', ...order } : o)));
+    const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
+    localStorage.setItem('userOrders', JSON.stringify((userOrders || []).map((o: any) => o.id === order.id ? { ...o, status: 'cancelled', ...order } : o)));
+  } catch (e) {
+    console.warn('Failed saving cancelled order to localStorage', e);
+  }
+
+  // 3) Play notification audio and show a "Order cancelled" toast
+  try {
+    startNotificationAudioFor5s();
+  } catch (e) {
+    console.warn('Failed to start notification audio', e);
+  }
+
+  try {
+    showNewOrderToast('Order cancelled');
+  } catch (e) {
+    console.warn('Failed to show cancelled toast', e);
+  }
+
+  // 4) Refresh stats/orders (no full reload)
+  try {
+    loadOrders().catch((err: any) => console.warn('reload loadOrders err', err));
+    loadStats().catch((err: any) => console.warn('reload loadStats err', err));
+  } catch (e) {
+    console.warn('Failed to refresh dashboard after cancellation', e);
+  }
+};
+
+
+  // Remove order from state (delete)
+  const removeOrderFromState = (orderId: any) => {
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    try {
+      const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+      localStorage.setItem('allOrders', JSON.stringify((allOrders || []).filter((o: any) => o.id !== orderId)));
+      const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
+      localStorage.setItem('userOrders', JSON.stringify((userOrders || []).filter((o: any) => o.id !== orderId)));
+    } catch (e) {}
+  };
+
+  // initial load
+  loadDashboardData().catch(() => {});
+
+  // Poll counts every 5s (if realtime not available, this still catches inserts)
+  const checkOrders = async () => {
+    try {
+      const { count, error } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true });
+
+      if (error) {
+        console.warn('Poll: failed to fetch orders count', error);
         return;
       }
 
-      const next = { ...currentCartObj, [id]: newQty };
-      const normalized = Object.fromEntries(
-        Object.entries(next).map(([k, v]) => [Number(k), v])
-      ) as { [key: number]: number };
-      saveCart(normalized);
-    } catch (e) {
-      console.warn('Error updating cart quantity', e);
-      setCartItems(prev => {
-        if (newQty <= 0) {
-          const { [itemId]: _, ...rest } = prev;
-          try { localStorage.setItem('cartItems', JSON.stringify(rest)); } catch {}
-          return rest;
+      if (typeof count === 'number') {
+        if (lastOrderCountRef.current !== null && count > lastOrderCountRef.current) {
+          // new order(s)
+          startNotificationAudioFor5s();
+          showNewOrderToast('New order placed');
+          loadOrders().catch((e) => console.warn('poll loadOrders err', e));
+          loadStats().catch((e) => console.warn('poll loadStats err', e));
         }
-        const next = { ...prev, [itemId]: newQty };
-        try { localStorage.setItem('cartItems', JSON.stringify(next)); } catch {}
-        return next;
-      });
-    }
-  };
-
-  const getTotalItems = () => {
-    return Object.values(cartItems).reduce((sum, qty) => sum + (qty as number), 0);
-  };
-
-  const getTotalPrice = () => {
-    const findPrice = (id: number) => {
-      const fromFeatured = featuredItems.find((i: any) => i.id === id);
-      if (fromFeatured) return fromFeatured.price;
-      try {
-        const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
-        if (Array.isArray(cached)) {
-          const item = cached.find((i: any) => i.id === id);
-          if (item) return item.price;
-        }
-      } catch (e) {
-        // ignore
+        lastOrderCountRef.current = count;
       }
-      return 0;
-    };
-
-    return Object.entries(cartItems).reduce((total, [itemId, qty]) => {
-      const id = parseInt(itemId);
-      const price = findPrice(id);
-      return total + price * (qty as number);
-    }, 0);
-  };
-  // ---------- end cart helpers ----------
-
-
-  const ratingCounts = useMemo(() => {
-    const counts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    for (const r of reviews) {
-      const rate = Math.min(5, Math.max(1, Math.round(Number(r.rating) || 0)));
-      counts[rate] = (counts[rate] || 0) + 1;
+    } catch (err) {
+      console.warn('Poll: exception checking orders', err);
     }
-    return counts;
-  }, [reviews]);
-
-  const totalReviews = useMemo(() => reviews.length, [reviews]);
-
-  const averageRating = useMemo(() => {
-    if (!reviews.length) return 0;
-    const sum = reviews.reduce((s, r) => s + (Number(r.rating) || 0), 0);
-    return Math.round((sum / reviews.length) * 10) / 10; // one decimal like Play Store
-  }, [reviews]);
-
-  // filtered list to render (home uses reviews slice directly, but keep this in case you change)
-  const visibleReviews = useMemo(() => {
-    if (filterRating === 'all') return reviews;
-    return reviews.filter(r => Math.round(Number(r.rating) || 0) === filterRating);
-  }, [reviews, filterRating]);
-
-  const ratingPercent = (star: number) => {
-    if (totalReviews === 0) return 0;
-    return Math.round(((ratingCounts[star as 1 | 2 | 3 | 4 | 5] || 0) / totalReviews) * 100);
   };
 
-  useEffect(() => {
-    // Load user type
-    const type = localStorage.getItem('userType') || 'user';
-    setUserType(type);
+  // initial poll then every 5s
+  checkOrders();
+  const pollId = window.setInterval(checkOrders, 5000);
+  pollIntervalRef.current = pollId;
+const handleRealtimePayload = (payload: any) => {
+  const event = (payload.event || payload.eventType || '').toString().toUpperCase();
+  const newRow = payload.new ?? payload.record ?? null;
+  const oldRow = payload.old ?? null;
 
-    // Load restaurant info (cached)
-    const savedInfo = JSON.parse(localStorage.getItem('restaurant_info') || 'null');
-    if (savedInfo) {
-      setrestaurant_info(savedInfo);
-    } else {
-      localStorage.setItem('restaurant_info', JSON.stringify(restaurant_info));
-    }
-
-    // Load cart from localStorage (ensure home page state is in sync)
-    try {
-      const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}') || {};
-      // normalize keys to numbers
-      const normalized = Object.fromEntries(
-        Object.entries(savedCart).map(([k, v]) => [Number(k), v])
-      ) as { [key: number]: number };
-      setCartItems(normalized);
-    } catch (e) {
-      setCartItems({});
-    }
-
-    setReviews([]);
-    setFeaturedItems([]);
-    setCategories([]);
-
-    loadMenuData();
-    loadReviews();
-
-    // close search if clicked outside
-    const onDocClick = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
-      }
-    };
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // recompute searchResults whenever searchTerm changes
-  useEffect(() => {
-    if (!searchTerm || searchTerm.trim().length === 0) {
-      setSearchResults([]);
-      return;
-    }
-    const q = searchTerm.trim().toLowerCase();
-    // use in-memory menuItems first; fallback to localStorage cached menu
-    const source = menuItems.length ? menuItems : (JSON.parse(localStorage.getItem('menuItems') || '[]') as any[]);
-    if (!Array.isArray(source) || source.length === 0) {
-      setSearchResults([]);
-      return;
-    }
-
-    const results = source.filter((item: any) => {
-      return (
-        String(item.name || '').toLowerCase().includes(q) ||
-        String(item.description || '').toLowerCase().includes(q) ||
-        String(item.category?.name || item.category || '').toLowerCase().includes(q)
-      );
-    }).slice(0, 8); // limit results
-    setSearchResults(results);
-  }, [searchTerm, menuItems]);
-
-
-
-
-
-
-
-
-
-
-const parseTimeSafe = (v: any): number => {
-  if (!v && v !== 0) return 0;
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') {
-    const asNum = Number(v);
-    if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
-    const asDate = Date.parse(v);
-    if (!Number.isNaN(asDate)) return asDate;
-    return 0;
-  }
   try {
-    const cast = new Date(v as any).getTime();
-    return Number.isNaN(cast) ? 0 : cast;
-  } catch {
-    return 0;
+    if (event === 'INSERT') {
+      if (newRow) {
+        upsertOrderInState(newRow);
+        loadStats().catch(() => {});
+        startNotificationAudioFor5s();
+        showNewOrderToast('New order placed');
+      }
+      return;
+    }
+
+    if (event === 'UPDATE') {
+      if (!newRow) return;
+
+      if ((newRow.status || '').toString().toLowerCase() === 'cancelled') {
+        markOrderCancelledInState(newRow);
+        loadStats().catch(() => {});
+        return;
+      }
+
+      upsertOrderInState(newRow);
+      loadStats().catch(() => {});
+      return;
+    }
+
+    if (event === 'DELETE') {
+      const deletedId = oldRow?.id ?? payload?.record?.id ?? null;
+      if (deletedId) {
+        removeOrderFromState(deletedId);
+        loadStats().catch(() => {});
+      }
+      return;
+    }
+
+    if (newRow) {
+      if ((newRow.status || '').toString().toLowerCase() === 'cancelled') {
+        markOrderCancelledInState(newRow);
+        loadStats().catch(() => {});
+      } else {
+        upsertOrderInState(newRow);
+        loadStats().catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('handleRealtimePayload error', err);
   }
 };
 
-const deriveFlagsForItem = (item: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
-  const createdRaw = item.created_at ?? null;
-  const updatedRaw = item.updated_at ?? null;
+  // Realtime subscription: supports both supabase-js v2 (channel) and v1 (.from().on())
+  // Realtime subscription: supports both supabase-js v2 (channel) and v1 (.from().on())
+let realtimeSub: any = null;
+try {
+  if ((supabase as any).channel) {
+    // v2
+    realtimeSub = (supabase as any)
+      .channel('public:orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (p: any) => handleRealtimePayload(p))
+      .subscribe();
+  } else {
+    // try v1 style but check at runtime
+    try {
+      const builder: any = (supabase as any).from ? (supabase as any).from('orders') : null;
+      if (builder && typeof builder.on === 'function') {
+        realtimeSub = builder
+          .on('*', (payload: any) => handleRealtimePayload(payload))
+          .subscribe();
+      } else {
+        console.warn('.from().on not available on supabase client — skipping v1 realtime.');
+      }
+    } catch (innerErr) {
+      console.warn('Error while attempting v1 realtime subscription', innerErr);
+    }
+  }
+} catch (e) {
+  console.warn('Failed to create realtime subscription', e);
+}
 
-  const created = parseTimeSafe(createdRaw);
-  const updated = parseTimeSafe(updatedRaw);
 
-  const isEdited = typeof item.isEdited === 'boolean'
-    ? !!item.isEdited
-    : (updated > 0 && created > 0 && updated !== created);
+  // cleanup
+  return () => {
+    try {
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      } else {
+        clearInterval(pollId);
+      }
+    } catch (e) {}
 
-  const isNew = typeof item.isNew === 'boolean'
-    ? !!item.isNew
-    : (created > 0 && (now - created) <= newThresholdMs);
+    // unsubscribe realtime
+    try {
+      if (realtimeSub) {
+        if (typeof realtimeSub.unsubscribe === 'function') {
+          realtimeSub.unsubscribe().catch(() => {});
+        } else if (typeof realtimeSub.remove === 'function') {
+          realtimeSub.remove();
+        } else if (realtimeSub && realtimeSub.channel) {
+          try { realtimeSub.channel.unsubscribe(); } catch(e) {}
+        }
+      }
+    } catch (e) {
+      console.warn('Error unsubscribing realtime', e);
+    }
 
-  const lastChanged = Math.max(created || 0, updated || 0);
+    // stop notification audio and timers
+    stopNotificationAudio();
 
-  return { created, updated, isEdited, isNew, lastChanged };
-};
+    // also cleanup audio element if you want to fully remove it
+    if (audioElRef.current) {
+      try {
+        audioElRef.current.src = '';
+        audioElRef.current = null;
+      } catch (e) {}
+    }
+  };
+}, [isLoggedIn, userType]);
 
-const loadMenuData = async () => {
+
+
+
+
+
+
+
+
+
+
+  const loadDashboardData = async () => {
+    setDataLoading(true);
+    try {
+      // Load all data simultaneously
+      await Promise.all([
+        loadOrders(),
+        loadMenuData(),
+        loadReviews(),
+        loadRestaurantInfo(),
+        loadAdmins(),
+        loadStats()   // <-- add this
+        
+      ]);
+    } catch (error) {
+      console.log('Error loading dashboard data:', error);
+    }
+    setDataLoading(false);
+  };
+
+  const loadOrders = async () => {
+    try {
+      // If your RLS allows the currently signed-in admin to read orders,
+      // the anon client (with session already present in the browser) should work.
+      // We DO NOT call supabase.auth.setAuth or signOut here.
+      const { data: ordersData, error: ordersErr } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500); // adjust if needed
+
+      if (ordersErr) {
+        console.log('Supabase ordersErr:', ordersErr);
+        // Fallback to localStorage copy if available
+        const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+        setOrders(allOrders);
+        return;
+      }
+
+      setOrders(ordersData || []);
+    } catch (error) {
+      console.log('Error loading orders:', error);
+      const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+      setOrders(allOrders);
+    }
+  };
+
+
+  // helper to safely upsert into orders state (keeps order list sorted by created_at desc)
+  const upsertOrderInState = (order: any) => {
+    setOrders(prev => {
+      const exists = prev.some(o => o.id === order.id);
+      if (exists) {
+        return prev.map(o => (o.id === order.id ? order : o)).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      } else {
+        return [order, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      }
+    });
+  };
+
+
+  const loadStats = async () => {
+    try {
+      // total orders excluding cancelled (count)
+      const { count: totalCount, error: totalErr } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .not('status', 'eq', 'cancelled');
+
+      if (totalErr) {
+        console.warn('totalErr', totalErr);
+      }
+
+      // cancelled orders count
+      const { count: cancelledCount, error: cancelledErr } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'cancelled');
+
+      if (cancelledErr) {
+        console.warn('cancelledErr', cancelledErr);
+      }
+
+      // active orders — those NOT completed/cancelled
+      const { count: activeCount, error: activeErr } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .not('status', 'in', '(completed,cancelled)');
+
+      if (activeErr) {
+        console.warn('activeErr', activeErr);
+      }
+
+      // revenue (sum of total for non-cancelled orders) - small table, do client-side
+      const { data: totalsRows, error: totalsErr } = await supabase
+        .from('orders')
+        .select('total, status');
+
+      if (totalsErr) {
+        console.warn('totalsErr', totalsErr);
+      }
+
+      const totalRevenueNum = Array.isArray(totalsRows)
+        ? totalsRows
+            .filter((r: any) => (r.status || '') !== 'cancelled')
+            .reduce((s: number, r: any) => s + (Number(r.total) || 0), 0)
+        : 0;
+
+      setTotalOrders(typeof totalCount === 'number' ? totalCount : 0);
+      setCancelledOrders(typeof cancelledCount === 'number' ? cancelledCount : 0);
+      setActiveOrders(typeof activeCount === 'number' ? activeCount : 0);
+      setTotalRevenue(totalRevenueNum);
+    } catch (err) {
+      console.log('Error loading stats:', err);
+    }
+  };
+
+  // replace the old filteredOrders block with this block
+  const filteredOrders = orders.filter((order) => {
+    // preserve your original search logic exactly
+    const search = (searchTerm || '').toLowerCase();
+
+    const idMatch = order.id?.toString().includes(search);
+
+    const nameMatch = `${order.customer?.firstName || ''} ${order.customer?.lastName || ''}`
+      .toLowerCase()
+      .includes(search);
+
+    const emailMatch = (order.customer?.email || '')
+      .toString()
+      .toLowerCase()
+      .includes(search);
+
+    const phoneMatch = (order.customer?.phone || '')
+      .toString()
+      .toLowerCase()
+      .includes(search);
+
+    const addressMatch = (order.address || order.location || order.delivery_address || '')
+      .toString()
+      .toLowerCase()
+      .includes(search);
+
+    // if you haven't added statusFilter state, default to 'all'
+    const activeStatusFilter = typeof statusFilter !== 'undefined' ? statusFilter : 'all';
+    const statusMatches = activeStatusFilter === 'all' ? true : ((order.status || '').toLowerCase() === activeStatusFilter);
+
+    return (idMatch || nameMatch || emailMatch || phoneMatch || addressMatch) && statusMatches;
+  });
+
+  // now apply sorting to produce the final list for rendering
+  const filteredAndSortedOrders = [...filteredOrders].sort((a: any, b: any) => {
+    const dir = (sortDir === 'asc') ? 1 : -1;
+
+    if (sortBy === 'date') {
+      const ta = new Date(a.created_at || a.createdAt || Date.now()).getTime();
+      const tb = new Date(b.created_at || b.createdAt || Date.now()).getTime();
+      return (tb - ta) * -dir; // if dir=1 (asc) invert
+    }
+
+    if (sortBy === 'total') {
+      const ta = Number(a.total || 0);
+      const tb = Number(b.total || 0);
+      return (tb - ta) * -dir;
+    }
+
+    // default / status alphabetical
+    const sa = (a.status || '').toString().toLowerCase();
+    const sb = (b.status || '').toString().toLowerCase();
+    if (sa < sb) return -1 * dir;
+    if (sa > sb) return 1 * dir;
+    return 0;
+  });
+
+
+
+
+ const loadMenuData = async () => {
+  setLoading(true);
   try {
     const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
       method: 'POST',
@@ -409,75 +1088,138 @@ const loadMenuData = async () => {
       body: JSON.stringify({ action: 'getMenuData' })
     });
 
-    const data = await response.json();
-
-    // DEBUG (optional): console.debug('admin-menu-service returned menuItems sample:', (data?.menuItems || []).slice(0,5));
-
-    if (data.success) {
-      const items = Array.isArray(data.menuItems) ? data.menuItems : [];
-
-      const categoriesWithCounts = (data.categories || []).map((cat: any) => ({
-        ...cat,
-        count: items.filter((item: any) => item.category_id === cat.id).length
-      }));
-      setCategories(categoriesWithCounts);
-
-      const now = Date.now();
-      const NEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-      const enriched = items.map((it: any) => {
-        const meta = deriveFlagsForItem(it, now, NEW_THRESHOLD_MS);
-        return { ...it, __meta: meta };
-      });
-
-// Robust comparator: priority (new/edited) first, then lastChanged desc (newest first)
-enriched.sort((a: any, b: any) => {
-  const A = a.__meta ?? {};
-  const B = b.__meta ?? {};
-
-  const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
-  const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
-  if (aPriority !== bPriority) return bPriority - aPriority; // higher priority first
-
-  // numeric compare of lastChanged (descending -> newest first)
-  const aLast = Number(A.lastChanged || 0);
-  const bLast = Number(B.lastChanged || 0);
-  if (bLast !== aLast) return bLast - aLast;
-
-  // fallback to created timestamp (descending)
-  const aCreated = Number(A.created || 0);
-  const bCreated = Number(B.created || 0);
-  if (bCreated !== aCreated) return bCreated - aCreated;
-
-  // final deterministic fallback: id descending (so higher id (newer) comes first)
-  // if your ids are numeric use numeric compare:
-  const aIdNum = Number(a.id);
-  const bIdNum = Number(b.id);
-  if (!Number.isNaN(aIdNum) && !Number.isNaN(bIdNum)) {
-    return bIdNum - aIdNum;
-  }
-  // otherwise string locale compare (ascending), but invert to get newest first
-  return String(b.id || '').localeCompare(String(a.id || ''));
-});
-
-
-
-
-
-
-      setFeaturedItems(enriched.slice(0, 3).map((i: any) => i));
-      setMenuItems(enriched.map((i: any) => i));
-
-      try {
-        localStorage.setItem('menuItems', JSON.stringify(enriched));
-      } catch (e) {
-        console.warn('Unable to cache menu items', e);
-      }
-    } else {
-      console.warn('admin-menu-service returned success=false', data);
+    // network-level check
+    if (!response.ok) {
+      console.error('admin-menu-service HTTP error', response.status, await response.text());
+      // attempt to use cached menu if available
+      const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+      setCategories([{ id: 'all', name: 'All Items' }]);
+      setMenuItems(Array.isArray(cached) ? cached : []);
+      //setFeaturedItems(Array.isArray(cached) ? cached.slice(0,3) : []);
+      return;
     }
-  } catch (error) {
-    console.error('Error loading menu data from database:', error);
+
+    const data = await response.json();
+    console.debug('admin-menu-service raw response:', data);
+
+    // Try multiple places where the items array might exist
+    let items: any[] | null = null;
+    const possiblePaths = [
+      data?.menuItems,
+      data?.menu_items,
+      data?.items,
+      data?.payload?.menuItems,
+      data?.payload?.menu_items,
+      data?.payload?.items
+    ];
+    for (const p of possiblePaths) {
+      if (Array.isArray(p)) { items = p; break; }
+    }
+
+    // Also derive categories from common places
+    let cats: any[] = [];
+    if (Array.isArray(data?.categories)) cats = data.categories;
+    else if (Array.isArray(data?.menu_categories)) cats = data.menu_categories;
+    else if (Array.isArray(data?.payload?.categories)) cats = data.payload.categories;
+
+    // If items still not found, try cached localStorage
+    if (!items) {
+      console.warn('No items array found in response; attempting fallback to localStorage. Response keys:', Object.keys(data || {}));
+      const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+      if (Array.isArray(cached) && cached.length) {
+        items = cached;
+        console.info('Using cached menuItems from localStorage (length=' + cached.length + ')');
+      } else {
+        // final fallback: if server returned something that looks like a wrapper object with keys, try to find an array value
+        const firstArray = Object.values(data || {}).find((v: any) => Array.isArray(v));
+        if (Array.isArray(firstArray)) {
+          items = firstArray;
+          console.info('Found items in first array-valued key of response');
+        }
+      }
+    }
+
+    // Ensure items is at least an empty array so UI will render the "no items" safely
+    if (!Array.isArray(items)) items = [];
+
+    // parse times helper (keeps safe for various formats)
+    const parseTimeSafe = (v: any): number => {
+      if (!v && v !== 0) return 0;
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const asNum = Number(v);
+        if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+        const asDate = Date.parse(v);
+        if (!Number.isNaN(asDate)) return asDate;
+        return 0;
+      }
+      try {
+        const cast = new Date(v as any).getTime();
+        return Number.isNaN(cast) ? 0 : cast;
+      } catch {
+        return 0;
+      }
+    };
+
+    // derive meta (created, updated, lastChanged, isNew, isEdited)
+    const deriveMeta = (it: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+      const createdRaw = it.created_at ?? it.createdAt ?? it.created ?? null;
+      const updatedRaw = it.updated_at ?? it.updatedAt ?? it.updated ?? null;
+      const created = parseTimeSafe(createdRaw);
+      const updated = parseTimeSafe(updatedRaw);
+      const lastChanged = Math.max(created || 0, updated || 0);
+      const isEdited = (updated > 0 && created > 0 && updated !== created);
+      const isNew = (created > 0 && (now - created) <= newThresholdMs);
+      return { created, updated, lastChanged, isEdited, isNew };
+    };
+
+    // Enrich items
+    const now = Date.now();
+    const enriched = items.map((it: any) => ({ ...it, __meta: deriveMeta(it, now) }));
+
+    // Sort: new/edited first, then lastChanged desc (newest first), then created desc, then id desc
+    enriched.sort((a: any, b: any) => {
+      const A = a.__meta ?? {};
+      const B = b.__meta ?? {};
+      const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+      const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+      if (aPriority !== bPriority) return bPriority - aPriority;
+      const aLast = Number(A.lastChanged || 0);
+      const bLast = Number(B.lastChanged || 0);
+      if (bLast !== aLast) return bLast - aLast;
+      const aCreated = Number(A.created || 0);
+      const bCreated = Number(B.created || 0);
+      if (bCreated !== aCreated) return bCreated - aCreated;
+      const aId = Number(a.id);
+      const bId = Number(b.id);
+      if (!Number.isNaN(aId) && !Number.isNaN(bId)) return bId - aId;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+    // Categories: ensure at least 'all'
+    const allCategory = { id: 'all', name: 'All Items' };
+    const categoriesWithCounts = [allCategory, ...(Array.isArray(cats) ? cats : [])].map((cat: any) => ({
+      ...cat,
+      count: enriched.filter((it: any) => String(it.category_id ?? it.category?.id ?? '') === String(cat.id)).length
+    }));
+
+    // set state & cache
+    setCategories(categoriesWithCounts);
+    setMenuItems(enriched);
+    //setFeaturedItems(enriched.slice(0, 3));
+    try { localStorage.setItem('menuItems', JSON.stringify(enriched)); } catch {}
+
+    // debug print top items
+    console.debug('sorted enriched sample (top 8):', enriched.slice(0,8).map((x:any)=>({
+      id: x.id, name: x.name, created: x.__meta?.created, updated: x.__meta?.updated, lastChanged: x.__meta?.lastChanged, isNew: x.__meta?.isNew, isEdited: x.__meta?.isEdited
+    })));
+  } catch (err) {
+    console.error('Error in loadMenuData fallback loader:', err);
+    // use cached menu if available
+    const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+    setCategories([{ id: 'all', name: 'All Items' }]);
+    setMenuItems(Array.isArray(cached) ? cached : []);
+    //setFeaturedItems(Array.isArray(cached) ? cached.slice(0,3) : []);
   } finally {
     setLoading(false);
   }
@@ -495,9 +1237,8 @@ enriched.sort((a: any, b: any) => {
 
 
 
+
   
-
-
   const loadReviews = async () => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/review-service`, {
@@ -506,22 +1247,453 @@ enriched.sort((a: any, b: any) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
         },
-        body: JSON.stringify({ action: 'getReviews' })
+        body: JSON.stringify({
+          action: 'getAllReviews'
+        })
       });
 
       const data = await response.json();
       if (data.success) {
         setReviews(data.reviews || []);
-      } else {
-        setReviews([]);
       }
     } catch (error) {
-      console.error('Error loading reviews from database:', error);
+      console.log('Error loading reviews:', error);
       setReviews([]);
     }
   };
 
-  const addReview = async (newReview: any) => {
+const loadRestaurantInfo = async () => {
+  try {
+    setRestaurantLoading(true); // if you already have this state, otherwise ignore
+    // fetch the single row (if you store only one row; if many rows adapt query)
+    const { data, error } = await supabase
+      .from('restaurant_info')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      // "No rows found" style error in older clients — treat as empty
+      setRestaurantInfo(null);
+      return;
+    }
+
+    if (error) {
+      console.error('Supabase error loading restaurant info:', error);
+      // fallback to localStorage if you want:
+      const saved = JSON.parse(localStorage.getItem('restaurantInfo') || 'null');
+      if (saved) setRestaurantInfo(saved);
+      return;
+    }
+
+    // store fetched record in state and in localStorage cache (optional)
+    setRestaurantInfo(data ?? null);
+    try {
+      localStorage.setItem('restaurantInfo', JSON.stringify(data ?? null));
+    } catch (e) {
+      // ignore localStorage write errors
+    }
+  } catch (err) {
+    console.error('Unexpected error in loadRestaurantInfo', err);
+    const saved = JSON.parse(localStorage.getItem('restaurantInfo') || 'null');
+    if (saved) setRestaurantInfo(saved);
+  } finally {
+    setRestaurantLoading(false);
+  }
+};
+
+
+
+
+
+
+// Load admins from server-side API (returns users with role/admin user_type)
+const loadAdmins = async () => {
+  try {
+    // Defensive fetch: server should return { success: true, admins: [...] }
+    const res = await fetch('/api/admins/list', { method: 'GET', headers: { 'Content-Type': 'application/json' }});
+    const text = await res.text().catch(() => '');
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok) {
+      console.warn('loadAdmins: server returned non-OK', res.status, payload);
+      // if API returns admins under different shape, try to handle common ones
+      if (payload?.admins) { setAdmins(payload.admins); return; }
+      setAdmins([]);
+      return;
+    }
+
+    // expected shape: { success: true, admins: [...] } or { admins: [...] }
+    const adminsList = Array.isArray(payload?.admins) ? payload.admins : (Array.isArray(payload) ? payload : []);
+    setAdmins(adminsList);
+  } catch (err) {
+    console.error('loadAdmins error:', err);
+    setAdmins([]);
+  }
+};
+
+
+
+
+
+
+
+  const showSuccessToast = (message: string) => {
+    const successToast = document.createElement('div');
+    successToast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300';
+    successToast.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <i class="ri-check-circle-line text-xl"></i>
+        <span>${message}</span>
+      </div>
+    `;
+    document.body.appendChild(successToast);
+    
+    setTimeout(() => {
+      successToast.style.opacity = '0';
+      successToast.style.transform = 'translateX(100%)';
+      setTimeout(() => {
+        if (document.body.contains(successToast)) {
+          document.body.removeChild(successToast);
+        }
+      }, 7000);
+    }, 7000);
+  };
+
+  const showErrorToast = (message: string) => {
+    const errorToast = document.createElement('div');
+    errorToast.className = 'fixed top-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+    errorToast.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <i class="ri-error-warning-line text-xl"></i>
+        <span>${message}</span>
+      </div>
+    `;
+    document.body.appendChild(errorToast);
+    
+    setTimeout(() => {
+      if (document.body.contains(errorToast)) {
+        document.body.removeChild(errorToast);
+      }
+    }, 7000);
+  };
+
+  const handleAddCategory = async (categoryData: any) => {
+    setLoading(true);
+    try {
+      console.log('Adding category:', categoryData);
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'addCategory',
+          categoryData: {
+            name: categoryData.name,
+            description: categoryData.description,
+            icon: categoryData.icon,
+            displayOrder: categoryData.displayOrder || 99
+          }
+        })
+      });
+
+      const data = await response.json();
+      console.log('Add category response:', data);
+      
+      if (data.success) {
+        // Reload menu data to show the new category
+        await loadMenuData();
+        setShowAddCategoryModal(false);
+        
+        // Reset form fields
+        const form = document.querySelector('#addCategoryForm') as HTMLFormElement;
+        if (form) form.reset();
+        
+        showSuccessToast(`Category "${categoryData.name}" added successfully!`);
+      } else {
+        showErrorToast(`Error: ${data.error || 'Failed to add category'}`);
+      }
+    } catch (error) {
+      console.log('Error adding category:', error);
+      showErrorToast('Network error. Please check your connection and try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleEditCategory = async (categoryData: any) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'updateCategory',
+          categoryId: selectedCategory.id,
+          categoryData
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadMenuData();
+        setShowEditCategoryModal(false);
+        setSelectedCategory(null);
+        showSuccessToast('Category updated successfully!');
+      } else {
+        showErrorToast('Error updating category: ' + data.error);
+      }
+    } catch (error) {
+      console.log('Error updating category:', error);
+      showErrorToast('Error updating category. Please try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    if (!confirm('Are you sure you want to delete this category? This action cannot be undone.')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'deleteCategory',
+          categoryId
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadMenuData();
+        showSuccessToast('Category deleted successfully!');
+      } else {
+        showErrorToast('Error deleting category: ' + data.error);
+      }
+    } catch (error) {
+      console.log('Error deleting category:', error);
+      showErrorToast('Error deleting category. Please try again.');
+    }
+    setLoading(false);
+  };
+
+
+  
+
+
+
+
+
+
+
+  const handleAddMenuItem = async (itemData: any) => {
+  setLoading(true);
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        action: 'addMenuItem',
+        itemData
+      })
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      await loadMenuData();
+      setShowAddItemModal(false);
+      showSuccessToast('Menu item added successfully!');
+    } else {
+      showErrorToast('Error adding menu item: ' + (data.error || 'Unknown'));
+    }
+  } catch (error) {
+    console.log('Error adding menu item:', error);
+    showErrorToast('Error adding menu item. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+const handleEditMenuItem = async (itemData: any) => {
+  setLoading(true);
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        action: 'updateMenuItem',
+        itemId: selectedItem?.id,
+        itemData
+      })
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      await loadMenuData();
+      setShowEditItemModal(false);
+      setSelectedItem(null);
+      showSuccessToast('Menu item updated successfully!');
+    } else {
+      showErrorToast('Error updating menu item: ' + (data.error || 'Unknown'));
+    }
+  } catch (error) {
+    console.log('Error updating menu item:', error);
+    showErrorToast('Error updating menu item. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+
+  const handleDeleteMenuItem = async (itemId: string) => {
+    if (!confirm('Are you sure you want to delete this menu item? This action cannot be undone.')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'deleteMenuItem',
+          itemId
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadMenuData();
+        showSuccessToast('Menu item deleted successfully!');
+      } else {
+        showErrorToast('Error deleting menu item: ' + data.error);
+      }
+    } catch (error) {
+      console.log('Error deleting menu item:', error);
+      showErrorToast('Error deleting menu item. Please try again.');
+    }
+    setLoading(false);
+  };
+
+
+  
+
+
+
+
+
+
+
+
+// replace the old updateRestaurantInfo with this function (paste entire function)
+const updateRestaurantInfo = async (info: any) => {
+  try {
+    // optional UI saving indicator (if you have setSaving)
+    if (typeof setSaving === 'function') setSaving(true);
+
+    // Normalize payload: remove undefined keys
+    const payload: Record<string, any> = {};
+    Object.entries(info || {}).forEach(([k, v]) => {
+      if (v !== undefined) payload[k] = v;
+    });
+
+    // Call server-side route that uses SUPABASE_SERVICE_ROLE_KEY to bypass RLS
+    // The server route will perform the upsert/update/insert safely.
+    const res = await fetch('/api/restaurant/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: payload.id ?? null,
+        updates: payload
+      })
+    });
+
+    const txt = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
+
+    if (!res.ok || body?.success === false) {
+      console.error('Server returned error for /api/restaurant/update:', res.status, body);
+      const msg = body?.error || body?.message || `Save failed (status ${res.status})`;
+      // show error to user
+      if (typeof showErrorToast === 'function') showErrorToast(msg);
+      else alert(msg);
+      return false;
+    }
+
+    // success — server returns the updated restaurant row under body.restaurant (or body.data)
+    const updated = body?.restaurant ?? body?.data ?? body?.result ?? null;
+
+    // Update UI state
+    if (typeof setRestaurantInfo === 'function') {
+      setRestaurantInfo(updated);
+      try { await loadRestaurantInfo(); } catch (e) { console.warn('loadRestaurantInfo after save failed', e); }
+    }
+
+    try { localStorage.setItem('restaurantInfo', JSON.stringify(updated)); } catch (e) {}
+
+    if (typeof showSuccessToast === 'function') showSuccessToast('Restaurant info saved');
+    else console.info('Restaurant info saved', updated);
+
+    return true;
+  } catch (err: any) {
+    console.error('Unexpected error in updateRestaurantInfo (client):', err);
+    if (typeof showErrorToast === 'function') showErrorToast('Unexpected error while saving. See console.');
+    else alert('Unexpected error while saving. See console.');
+    return false;
+  } finally {
+    if (typeof setSaving === 'function') setSaving(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  const approveReview = async (reviewId: number) => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/review-service`, {
         method: 'POST',
@@ -530,432 +1702,829 @@ enriched.sort((a: any, b: any) => {
           'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
         },
         body: JSON.stringify({
-          action: 'createReview',
+          action: 'approveReview',
+          reviewId
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadReviews();
+        showSuccessToast('Review approved successfully!');
+      } else {
+        showErrorToast('Error approving review: ' + data.error);
+      }
+    } catch (error) {
+      console.log('Error approving review:', error);
+      showErrorToast('Error approving review. Please try again.');
+    }
+  };
+
+
+
+
+
+const deleteReview = async (reviewId: number) => {
+  // if (!confirm('Are you sure you want to delete this review?')) return;
+
+  // optimistic update
+  const prev = reviews;
+  setReviews(prevState => prevState.filter(r => Number(r.id) !== Number(reviewId)));
+
+  try {
+    const res = await fetch('/api/reviews/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewId: Number(reviewId) })
+    });
+
+    // read raw text so we can log or attempt JSON parse for both ok and non-ok
+    const raw = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = { raw }; }
+
+    if (!res.ok) {
+      console.error('[deleteReview] server returned non-OK', res.status, body);
+      // show server-provided error if any, otherwise a generic message
+      const serverMsg = body?.error || body?.message || (body?.raw && String(body.raw)) || 'Unknown server error';
+      showErrorToast('Failed to delete review: ' + serverMsg);
+      setReviews(prev); // revert optimistic update
+      return;
+    }
+
+    // res.ok
+    if (!body || body.success === false) {
+      console.warn('[deleteReview] delete responded but reported failure:', body);
+      const serverMsg = body?.error || 'Delete failed';
+      showErrorToast('Failed to delete review: ' + serverMsg);
+      setReviews(prev); // revert
+      return;
+    }
+
+    console.log('[deleteReview] success:', body);
+    showSuccessToast('Review deleted successfully!');
+    // optional: refresh list from server
+    await loadReviews();
+  } catch (err) {
+    // network-level or unexpected JS error
+    console.error('[deleteReview] network / unexpected error:', err);
+    showErrorToast('Failed to delete review (network). See console for details.');
+    setReviews(prev); // revert optimistic update
+  }
+};
+
+
+
+
+
+
+
+// Add a new admin (calls server-side API)
+const addAdmin = async (adminData: { first_name?: string; last_name?: string; name?: string; email: string; password?: string; phone?: string; role?: string }) => {
+  try {
+    setLoading(true);
+    // prepare payload: support both name and first/last split
+    const payload: any = {
+      email: adminData.email,
+      password: adminData.password || (Math.random().toString(36).slice(2, 10) + 'A1!'),
+      first_name: adminData.first_name ?? (adminData.name ? adminData.name.split(' ')[0] : null),
+      last_name: adminData.last_name ?? (adminData.name ? adminData.name.split(' ').slice(1).join(' ') : null),
+      phone: adminData.phone ?? null,
+      role: adminData.role ?? 'admin',
+      user_type: 'admin'
+    };
+
+    const res = await fetch('/api/admins/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text().catch(() => '');
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+
+    if (!res.ok || !data || data.success === false) {
+      console.error('Failed to add admin:', res.status, data);
+      showErrorToast('Failed to add admin: ' + (data?.error ?? 'Unknown error'));
+      return false;
+    }
+
+    // refresh list
+    await loadAdmins();
+    showSuccessToast('Admin added successfully');
+    return true;
+  } catch (err) {
+    console.error('addAdmin error:', err);
+    showErrorToast('Error adding admin. See console.');
+    return false;
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+const fetchAdmins = async () => {
+  setLoadingAdmins(true);
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/list", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const text = await res.text();
+    let payload: any = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch (e) {
+      console.warn("fetchAdmins: response was not valid JSON", text);
+      payload = null;
+    }
+
+    if (!res.ok) {
+      console.error("fetchAdmins non-OK", res.status, payload);
+      setAdmins([]);
+      return;
+    }
+
+    setAdmins(Array.isArray(payload?.admins) ? payload.admins : []);
+  } catch (err) {
+    console.error("fetchAdmins exception:", err);
+    setOperationError(err?.message ?? "Failed to load admins");
+    setAdmins([]);
+  } finally {
+    setLoadingAdmins(false);
+  }
+};
+
+
+
+
+
+// Remove admin (calls POST /api/admins/delete with { id })
+const removeAdmin = async (adminId: string) => {
+  if (!confirm("Remove this admin? This action cannot be undone.")) return;
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: adminId }),
+    });
+    const text = await res.text();
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok || payload?.success === false) {
+      console.error("removeAdmin failed:", res.status, payload);
+      setOperationError(payload?.error ?? `Failed to remove admin (${res.status})`);
+      // refresh anyway to avoid UI drift
+      await fetchAdmins();
+      return;
+    }
+
+    // optimistic update
+    setAdmins(prev => prev.filter(a => String(a.id) !== String(adminId)));
+    // ensure fresh
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("removeAdmin error:", err);
+    setOperationError(err?.message ?? "Failed to remove admin");
+    await fetchAdmins();
+  }
+};
+
+
+
+
+
+
+
+
+const handleAdminSave = async (payload: any) => {
+  setOperationError(null);
+  try {
+    // Ensure address is normalized...
+    if (!payload.address) {
+      const street = (payload.address_street ?? "").toString().trim();
+      const city = (payload.address_city ?? "").toString().trim();
+      const state = (payload.address_state ?? "").toString().trim();
+      const zip = (payload.address_zip_code ?? payload.address_zip ?? "").toString().trim();
+
+      if (street || city || state || zip) {
+        payload.address = { street: street || null, city: city || null, state: state || null, zip: zip || null };
+      } else {
+        payload.address = null;
+      }
+
+      delete payload.address_street;
+      delete payload.address_city;
+      delete payload.address_state;
+      delete payload.address_zip_code;
+    }
+
+    // 🔑 Add this block: enforce role based on current logged-in user
+    const currentUserType = localStorage.getItem("userType");
+    if (currentUserType === "superadmin") {
+      payload.role = "admin";
+      payload.user_type = "admin";
+    } else {
+      payload.role = "user";
+      payload.user_type = "user";
+    }
+
+    const url = payload.id ? "/api/admins/edit" : "/api/admins/add";
+    const method: "POST" | "PUT" = payload.id ? "PUT" : "POST";
+
+    console.debug("handleAdminSave outgoing payload:", JSON.stringify(payload));
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { throw new Error("Server returned non-JSON: " + (text?.slice(0,200) || "<empty>")); }
+
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+
+    showSuccessToast(payload.id ? "Admin updated" : "Admin added");
+    setShowAdminModal(false);
+    setEditingAdmin(null);
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("handleAdminSave error:", err);
+    const msg = err?.message ?? "Failed to save admin";
+    setOperationError(msg);
+    showErrorToast(msg);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  const toggleFeaturedReview = async (reviewId: number, currentFeatured: boolean) => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/review-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'toggleFeatured',
+          reviewId,
           reviewData: {
-            name: newReview.name,
-            email: newReview.email,
-            rating: newReview.rating,
-            text: newReview.text
+            isFeatured: currentFeatured
           }
         })
       });
 
       const data = await response.json();
       if (data.success) {
-        const successToast = document.createElement('div');
-        successToast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300';
-        successToast.innerHTML = `<div class="flex items-center space-x-2"><i class="ri-check-circle-line text-xl"></i><span>Thank you for your review! It has been posted.</span></div>`;
-        document.body.appendChild(successToast);
-        setTimeout(() => {
-          successToast.style.opacity = '0';
-          successToast.style.transform = 'translateX(100%)';
-          setTimeout(() => {
-            if (document.body.contains(successToast)) {
-              document.body.removeChild(successToast);
-            }
-          }, 300);
-        }, 4000);
         await loadReviews();
+        showSuccessToast(`Review ${currentFeatured ? 'unfeatured' : 'featured'} successfully!`);
       } else {
-        alert('Error submitting review: ' + (data.error || 'Please try again.'));
+        showErrorToast('Error updating review: ' + data.error);
       }
     } catch (error) {
-      console.error('Error submitting review:', error);
-      alert('Error submitting review. Please check your connection and try again.');
+      console.log('Error updating review:', error);
+      showErrorToast('Error updating review. Please try again.');
     }
   };
 
-  // handle selection: go to menu page and (optionally) pass item id in query
-  const onSelectResult = (item: any) => {
-    setSearchOpen(false);
-    setSearchTerm('');
-    // navigate to menu page with item id — you can adapt this handling
-    router.push(`/menu?item=${item.id}`);
-  };
-
-  // Small Stars helper component used in the reviews/metrics UI
-  const Stars = ({ value, size = 'text-lg' }: { value: number; size?: string }) => {
-    const v = Math.round(Number(value) || 0);
+  if (!isLoggedIn || (userType !== 'admin' && userType !== 'superadmin')) {
     return (
-      <div className={`inline-flex items-center ${size}`}>
-        {[1,2,3,4,5].map((i) => (
-          <i key={i} className={`ri-star-${i <= v ? 'fill' : 'line'} text-yellow-400 ${i < 5 ? 'mr-0.5' : ''}`}></i>
-        ))}
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="container mx-auto px-4 py-16 text-center">
+          <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <i className="ri-lock-line text-4xl text-red-600"></i>
+          </div>
+          <h1 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h1>
+          <p className="text-gray-600 mb-8">You need admin privileges to access this dashboard.</p>
+          <Link href="/login" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap">
+            Admin Login
+          </Link>
+        </div>
       </div>
     );
+  }
+
+  const recentOrders = orders.slice(0, 5);
+
+  const handleViewCategory = (category: any) => {
+    setSelectedCategory(category);
+    setShowCategoryModal(true);
   };
+
+  const handleViewOrder = (order: any) => {
+    setSelectedOrder(order);
+    setShowOrderModal(true);
+  };
+
+  const handleStatusUpdate = async (orderId: string, newStatus: string) => {
+    try {
+      // 1) Try updating directly in Supabase
+      const { error: supaErr } = await supabase
+        .from('orders')
+        .update({ status: newStatus })
+        .eq('id', orderId);
+
+      if (!supaErr) {
+        await loadOrders();
+        showSuccessToast('Order status updated successfully.');
+        return;
+      }
+
+      console.warn('Server update failed, falling back to edge function:', supaErr);
+
+      // 2) Fallback: call edge function
+      const authToken = localStorage.getItem('authToken');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/order-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'updateOrderStatus',
+          orderId,
+          status: newStatus
+        })
+      });
+
+      // If fetch itself failed (network), response.ok might be false
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        console.warn('Edge function returned non-OK status:', response.status, text);
+        showErrorToast('Failed to update order status (network).');
+        return;
+      }
+
+      const data = await response.json().catch((err) => {
+        console.warn('Failed to parse edge function JSON response:', err);
+        return null;
+      });
+
+      if (data && data.success) {
+        await loadOrders();
+        showSuccessToast('Order status updated successfully (Edge Function).');
+        return;
+      }
+
+      console.warn('Edge function update failed:', data?.error || 'unknown');
+
+      // Both Supabase and edge function failed — do NOT touch localStorage (per request).
+      showErrorToast('Unable to update order status. Please try again or contact support.');
+    } catch (error) {
+      console.log('Error updating order status:', error);
+      showErrorToast('Error updating order status. Please try again.');
+    }
+  };
+
+  const handleCancelOrder = async (orderId: string) => {
+    // if (!confirm('Are you sure you want to cancel and remove this order? This cannot be undone.')) return;
+
+    // prevent double clicks
+    if (processingOrderId) {
+      console.log('Already processing order:', processingOrderId);
+      return;
+    }
+    setProcessingOrderId(orderId);
+
+    try {
+      console.log('Attempting to delete order', orderId);
+
+      // 1) Try direct delete via Supabase client
+      const { error: deleteErr } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderId);
+
+      if (!deleteErr) {
+        // remove from local UI state quickly
+        setOrders(prev => prev.filter(o => o.id !== orderId));
+
+        // remove from localStorage caches if present
+        try {
+          const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+          localStorage.setItem('allOrders', JSON.stringify((allOrders || []).filter((o: any) => o.id !== orderId)));
+
+          const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
+          localStorage.setItem('userOrders', JSON.stringify((userOrders || []).filter((o: any) => o.id !== orderId)));
+        } catch (e) {
+          console.warn('Failed to update localStorage caches', e);
+        }
+
+        await loadOrders(); // refresh from server to be safe
+        showSuccessToast('Order removed successfully.');
+        return;
+      }
+
+      console.warn('Direct delete failed:', deleteErr);
+
+      // 2) Fallback: call edge function (server-side) to perform delete with elevated privileges
+      const authToken = localStorage.getItem('authToken');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/order-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: 'deleteOrder',
+          orderId
+        })
+      });
+      if (!deleteErr) {
+        setOrders(prev => prev.filter(o => o.id !== orderId));
+        // ... localStorage cleanup ...
+        await loadOrders();
+        await loadStats(); // <--- add this
+        showSuccessToast('Order removed successfully.');
+        return;
+      }
+
+      if (!response.ok) {
+        const txt = await response.text().catch(() => '');
+        console.warn('Edge function delete returned non-OK:', response.status, txt);
+        showErrorToast('Failed to remove order (network).');
+        return;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (data && data.success) {
+        // update local UI & storage
+        setOrders(prev => prev.filter(o => o.id !== orderId));
+        try {
+          const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
+          localStorage.setItem('allOrders', JSON.stringify((allOrders || []).filter((o: any) => o.id !== orderId)));
+
+          const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
+          localStorage.setItem('userOrders', JSON.stringify((userOrders || []).filter((o: any) => o.id !== orderId)));
+        } catch (e) {
+          console.warn('Failed to update localStorage caches after edge function', e);
+        }
+
+        await loadOrders();
+        await loadStats(); // <--- add this
+        showSuccessToast('Order removed successfully (Edge Function).');
+        showSuccessToast('Order removed successfully (Edge Function).');
+        return;
+      }
+
+      console.warn('Edge function delete failed:', data?.error || data);
+      showErrorToast('Unable to remove order. Please contact support.');
+    } catch (error) {
+      console.log('Error deleting order:', error);
+      showErrorToast('Error removing order. Please try again.');
+    } finally {
+      setProcessingOrderId(null);
+    }
+  };
+
+
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'placed': return 'bg-blue-400 text-blue-1200';
+      case 'preparing': return 'bg-yellow-400 text-yellow-1200';
+      case 'ready': return 'bg-orange-400 text-orange-1200';
+      case 'on-the-way': return 'bg-purple-400 text-purple-1200';
+      case 'completed': return 'bg-green-400 text-green-1200';
+      case 'cancelled': return 'bg-red-400 text-red-1200';
+      case 'delivery': return 'bg-teal-400 text-teal-1200';
+      case 'pickup': return 'bg-cyan-400 text-cyan-1200';
+      default: return 'bg-blue-100 text-blue-800';
+    }
+  };
+
+  if (dataLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="container mx-auto px-4 py-16 text-center">
+          <div className="w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
+      
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
+            <p className="text-gray-600">
+              Welcome back, {userType === 'superadmin' ? 'Owner' : 'Admin'}!
+            </p>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
+              {userType === 'superadmin' ? 'Owner' : 'Admin'} Panel
+            </span>
+            {userType === 'superadmin' && (
+              <button
+                onClick={() => setShowOwnerPanel(true)}
+                className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap text-sm"
+              >
+                <i className="ri-settings-line mr-2"></i>
+                Owner Settings
+              </button>
+            )}
+          </div>
+        </div>
 
-      {/* Hero Section */}
-      <section className="relative bg-gradient-to-r from-orange-600 to-red-600 text-white py-20"
-        style={{
-          backgroundImage: `linear-gradient(rgba(251,146,60,0.8), rgba(220,38,38,0.8)), url('https://readdy.ai/api/search-image?query=Traditional%20Newari%20restaurant%20interior&width=1200&height=600')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        }}>
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-5xl md:text-6xl font-bold mb-6">Authentic Newari Cuisine</h1>
-          <p className="text-xl md:text-2xl mb-8 max-w-2xl mx-auto">
-  Experience traditional flavors at {restaurant_info?.name ?? 'Our Restaurant'} in the heart of Pokhara
-</p>
+        {loading && (
+          <div className="text-center py-8">
+            <div className="w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading dashboard data...</p>
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="flex space-x-1 bg-gray-200 rounded-full p-1 mb-8 max-w-lg">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
+              activeTab === 'overview'
+                ? 'bg-white text-orange-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
+              activeTab === 'orders'
+                ? 'bg-white text-orange-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('menu-items')}
+            className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
+              activeTab === 'menu-items'
+                ? 'bg-white text-orange-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Menu Items
+          </button>
+          <button
+            onClick={() => setActiveTab('categories')}
+            className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
+              activeTab === 'categories'
+                ? 'bg-white text-orange-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Categories
+          </button>
 
 
-          {/* Search bar (replaces Track Order) */}
-          <div ref={searchRef} className="max-w-2xl mx-auto w-full relative">
-            <div className="flex items-center gap-4 justify-center">
-              <div className="relative w-full">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                  <i className="ri-search-line text-gray-200 text-lg"></i>
+
+
+
+</div>
+
+
+<button
+    onClick={loadDashboardData}
+  className="flex items-center gap-2 px-4 py-2 
+  bg-white border border-gray-300 text-gray-700 
+  rounded-lg shadow-sm hover:bg-gray-100 
+  hover:border-gray-400 transition-colors 
+  duration-200"
+
+  >
+
+    <i className="ri-refresh-line"></i>
+    <span>Refresh</span>
+  </button>
+
+
+    
+
+        {/* Overview Tab */}
+        {activeTab === 'overview' && (
+          <div className="space-y-8">
+            {/* Stats Cards */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm">Total Orders</p>
+                    <p className="text-2xl font-bold text-gray-800">{totalOrders}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                    <i className="ri-shopping-bag-line text-blue-600 text-xl"></i>
+                  </div>
                 </div>
-                <input
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setSearchOpen(true);
-                  }}
-                  onFocus={() => setSearchOpen(true)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setSearchOpen(false);
-                      setSearchTerm('');
-                    }
-                    if (e.key === 'Enter' && searchResults.length > 0) {
-                      onSelectResult(searchResults[0]);
-                    }
-                  }}
-                  placeholder="Search menu items..."
-                  className="w-full pl-12 pr-4 py-4 rounded-full bg-white bg-opacity-20 placeholder-white placeholder-opacity-90 focus:bg-white focus:bg-opacity-100 focus:text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-400 transition-all"
-                />
               </div>
 
-              <button
-                onClick={() => {
-                  // quick go to full menu page with optional query param
-                  if (searchTerm && searchTerm.trim().length > 0) {
-                    // push search param to menu for later extension
-                    router.push(`/menu?search=${encodeURIComponent(searchTerm.trim())}`);
-                  } else {
-                    router.push('/menu');
-                  }
-                }}
-                className="bg-white text-orange-600 px-6 py-3 rounded-full font-semibold hover:bg-gray-100 transition-colors whitespace-nowrap"
-              >
-                Browse Menu
-              </button>
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm">Active Orders</p>
+                    <p className="text-2xl font-bold text-gray-800">
+                      {activeOrders}
+                    </p>
+                  </div>
+                  <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                    <i className="ri-time-line text-orange-600 text-xl"></i>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm">Cancelled</p>
+                    <p className="text-2xl font-bold text-gray-800">{cancelledOrders}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                    <i className="ri-close-circle-line text-red-600 text-xl"></i>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm">Total Revenue</p>
+                    <p className="text-2xl font-bold text-gray-800">
+                      ₨{(totalRevenue || 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                    <i className="ri-money-dollar-circle-line text-green-600 text-xl"></i>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm">Menu Items</p>
+                    <p className="text-2xl font-bold text-gray-800">{menuItems.length}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                    <i className="ri-restaurant-line text-purple-600 text-xl"></i>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* live dropdown */}
-            {searchOpen && searchTerm.trim().length > 0 && (
-              <div className="absolute left-0 right-0 mt-3 bg-white rounded-xl shadow-lg z-50 max-h-96 overflow-auto">
-                {searchResults.length === 0 ? (
-                  <div className="p-4 text-sm text-gray-600">No results</div>
+            {/* Recent Orders */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-semibold">Recent Orders</h2>
+                <button
+                  onClick={() => setActiveTab('orders')}
+                  className="text-orange-600 hover:text-orange-700 font-medium cursor-pointer"
+                >
+                  View All
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {recentOrders.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8">No orders yet</p>
                 ) : (
-                  searchResults.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => onSelectResult(item)}
-                      className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-4 border-b last:border-b-0"
-                    >
-                      <img
-                        src={item.image_url || item.image || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food&width=120&height=80'}
-                        alt={item.name}
-                        loading="lazy"
-                        className="w-16 h-12 object-cover rounded-md flex-shrink-0"
-                      />
+                  recentOrders.map((order) => (
+                    <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                       <div className="flex-1">
-                        <div className="flex justify-between items-center">
-                          <div className="font-semibold text-gray-800">{item.name}</div>
-                          <div className="text-orange-600 font-bold">₨{item.price}</div>
+                        <div className="flex items-center space-x-3">
+                          <h3 className="font-semibold">Order #{order.id}</h3>
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
+                            {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
+                          </span>
+
+                        <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor((order?.order_type || 'pickup').toString().toLowerCase())} bg-gray-100`}>
+                          {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
+                        </span>
+
+
+
                         </div>
-                        <div className="text-sm text-gray-500 mt-1">{item.category?.name || item.category || ''}</div>
+                        <p className="text-sm text-gray-600">
+                          {order.customer.firstName} {order.customer.lastName} - ₨{(order.total || 0).toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(order.created_at || Date.now()).toLocaleString()}
+                        </p>
                       </div>
-                    </button>
+                      <button
+                        onClick={() => handleViewOrder(order)}
+                        className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                      >
+                        <i className="ri-eye-line"></i>
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
-            )}
-          </div>
-
-        </div>
-      </section>
-
-
-
-<section className="py-16 bg-white">
-  <div className="container mx-auto px-4">
-    <h2 className="text-3xl sm:text-4xl font-bold text-center mb-12 text-gray-800">
-      Browse Categories
-    </h2>
-
-    {loading ? (
-      // Skeleton grid for categories
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6 animate-pulse">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="w-full h-40 bg-gray-200 rounded-xl" />
-        ))}
-      </div>
-    ) : categories.length === 0 ? (
-      <div className="text-center py-16">
-        <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-          <i className="ri-folder-line text-3xl text-gray-400"></i>
-        </div>
-        <h3 className="text-xl sm:text-2xl font-semibold text-gray-600 mb-2">
-          No Categories Yet
-        </h3>
-        <p className="text-gray-500 mb-6">
-          Categories will appear here once the owner adds them
-        </p>
-        <Link
-          href="/menu"
-          className="inline-block bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap"
-        >
-          View Menu
-        </Link>
-      </div>
-    ) : (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-        {categories.map((category: any, index: number) => {
-          const src = categoryIconMap?.[category.id] ?? null;
-
-          return (
-            <Link
-              key={category.id ?? index}
-              href={`/menu?category=${encodeURIComponent(category.slug || category.id)}`}
-              className="block group"
-            >
-              <div className="relative w-full h-40 sm:h-48 lg:h-56 rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
-                {src ? (
-                  <img
-                    src={src}
-                    alt={category.name}
-                    loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
-                    <i className="ri-restaurant-line text-4xl text-gray-400"></i>
-                  </div>
-                )}
-
-                {/* Overlay for name */}
-                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors"></div>
-                <div className="absolute bottom-3 left-3 right-3 text-white font-semibold text-lg sm:text-xl">
-                  {category.name}
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      
-
-      </div>
-
-
-    )}
-  </div>
-</section>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-      {/* Featured Items */}
-      <section className="py-16 bg-gray-50">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Featured Dishes</h2>
-
-          {loading ? (
-            // Skeleton cards for featured items
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
             </div>
-          ) : featuredItems.length === 0 ? (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="ri-restaurant-line text-2xl text-gray-400"></i>
-              </div>
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">No Menu Items Yet</h3>
-              <p className="text-gray-500 mb-6">Featured dishes will appear here once the owner adds menu items</p>
-              <Link href="/menu" className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-                View Menu
-              </Link>
-            </div>
+
+<div className="bg-white rounded-2xl shadow-lg p-8 mt-8">
+  <h2 className="text-2xl font-semibold mb-6 text-gray-800">User Questions</h2>
+
+  {loadingQuestions ? (
+    <p>Loading…</p>
+  ) : (
+    <div className="space-y-4">
+      {userQuestions.map((q) => (
+        <div key={q.id} className="border border-gray-200 rounded-lg p-4">
+          <p className="font-semibold text-gray-800">{q.question}</p>
+          {q.is_answered ? (
+            <p className="text-green-600 mt-2">{q.answer}</p>
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
-             
-             
-{featuredItems.map((item) => {
-  const meta = item.__meta || {};
-  const isNew = !!meta.isNew;
-  const isEdited = !!meta.isEdited;
-
-  return (
-    <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative">
-      <div className="aspect-video relative">
-        <img
-          src={item.image_url || item.image}
-          alt={item.name}
-          loading="lazy"
-          className="w-full h-full object-cover object-top"
-        />
-
-        {/* Badges in top-left */}
-        <div className="absolute top-3 left-3 flex gap-2">
-          {isNew && <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">NEW</span>}
-          {isEdited && <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">EDITED</span>}
-        </div>
-      </div>
-
-      <div className="p-6">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
-          <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
-        </div>
-
-        <p className="text-gray-600 mb-4">{item.description}</p>
-
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-            {item.category?.name || item.category}
-          </span>
-
-          {cartItems[item.id] ? (
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  const newQty = Math.max(0, (cartItems[item.id] || 0) - 1);
-                  updateQuantity(item.id, newQty);
+            (userType === 'admin' || userType === 'superadmin') && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target as HTMLFormElement);
+                  replyToQuestion(q.id, formData.get('answer') as string);
                 }}
-                className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
+                className="mt-2 space-y-2"
               >
-                <i className="ri-subtract-line"></i>
-              </button>
-
-              <span className="font-semibold text-lg">{cartItems[item.id]}</span>
-
-              <button
-                onClick={() => addToCart(item.id, 1)}
-                className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
-              >
-                <i className="ri-add-line"></i>
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => addToCart(item.id, 1)}
-              className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              Add to Cart
-            </button>
+                <textarea
+                  name="answer"
+                  className="w-full border p-2 rounded"
+                  placeholder="Write reply…"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="bg-orange-600 text-white px-3 py-1 rounded"
+                >
+                  Reply
+                </button>
+              </form>
+            )
           )}
         </div>
-      </div>
-    </div>
-  );
-})}
-
-
-
-
-            </div>
-          )}
-
-          <div className="text-center mt-12">
-            <Link href="/menu" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-              View Full Menu
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* Customer Reviews Section */}
-{/* Customer Reviews Section */}
-<section className="py-16 bg-gray-50">
-  <div className="container mx-auto px-4">
-    <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">
-      What Our Customers Say
-    </h2>
-        {/* Top metrics: avg rating, total, distribution */}
-       {/* Responsive rating summary (mobile-first) */}
-
-
-
-
-
-
-
-<div className="bg-white rounded-2xl shadow-lg p-4 md:p-6 mb-8">
-  <div className="flex flex-col md:flex-row md:items-center md:space-x-6">
-    {/* Left column: average + stars */}
-    <div className="flex-shrink-0 text-center md:text-left mb-4 md:mb-0">
-      <div className="text-3xl md:text-4xl font-bold text-gray-800">{averageRating.toFixed(1)}</div>
-      <div className="mt-1"><Stars value={averageRating} size="text-sm md:text-base" /></div>
-      <div className="text-xs md:text-sm text-gray-500 mt-1">{totalReviews} {totalReviews === 1 ? 'review' : 'reviews'}</div>
-    </div>
-
-    {/* vertical divider on md+ */}
-    <div className="hidden md:block w-px h-16 bg-gray-100" />
-
-    {/* Right column: distribution rows */}
-    <div className="flex-1">
-      {[5, 4, 3, 2, 1].map((star) => (
-        <button
-          key={star}
-          type="button"
-          onClick={() => setFilterRating(prev => (prev === star ? 'all' : star))}
-          className="w-full flex items-center gap-3 mb-3 md:mb-4 px-1 py-2 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-200"
-          aria-pressed={filterRating === star}
-          title={filterRating === star ? `Showing ${star}-star reviews. Click to clear.` : `Show ${star}-star reviews`}
-        >
-          {/* star label (fixed width) */}
-          <span className="w-9 text-sm md:text-sm flex-shrink-0 text-left">{star}★</span>
-
-          {/* bar: fills remaining horizontal space */}
-          <div className="flex-1">
-            <div className="bg-gray-100 rounded-full h-3 md:h-4 overflow-hidden">
-              <div
-                className="h-3 md:h-4 rounded-full bg-orange-500 transition-all duration-300"
-                style={{ width: `${ratingPercent(star)}%` }}
-                aria-hidden
-              />
-            </div>
-          </div>
-
-          {/* count pill - larger tappable target on mobile */}
-          <span className={`ml-3 text-sm md:text-sm font-medium px-3 py-1 rounded-full ${filterRating === star ? 'bg-orange-600 text-white' : 'bg-white text-gray-700 border border-gray-100'}`}>
-            {ratingCounts[star as 1 | 2 | 3 | 4 | 5] || 0}
-          </span>
-        </button>
       ))}
-
-      {/* actions: See all or Show all */}
-      <div className="mt-3 md:mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <Link
-          href="/reviews"
-          className="inline-flex justify-center items-center px-5 py-2 md:px-6 md:py-3 bg-orange-600 text-white rounded-full font-semibold hover:bg-orange-700 transition"
-        >
-          See All Reviews
-        </Link>
-
-
-      </div>
     </div>
-  </div>
+  )}
 </div>
 
 
@@ -963,58 +2532,423 @@ enriched.sort((a: any, b: any) => {
 
 
 
+            {/* Reviews Management (Owner Only) */}
+            {userType === 'superadmin' && (
 
 
-    {reviews.length === 0 ? (
-      // Reviews skeleton
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-        <div className="animate-pulse"><SkeletonReview /></div>
-        <div className="animate-pulse"><SkeletonReview /></div>
-        <div className="animate-pulse hidden lg:block"><SkeletonReview /></div>
-      </div>
-    ) : (
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-        {(visibleReviews.slice(0, 6)).map((review) => (
-          <div key={review.id} className="bg-white rounded-2xl shadow-lg p-6">
-            <div className="flex items-center mb-4">
-              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mr-4">
-                <i className="ri-user-line text-orange-600 text-xl"></i>
-              </div>
-              <div>
-                <h4 className="font-semibold text-gray-800">{review.customer_name || review.name || 'Anonymous'}</h4>
-                <div className="flex items-center">
-                  {[...Array(5)].map((_, i) => (
-                    <i
-                      key={i}
-                      className={`ri-star-${i < (Number(review.rating) || 0) ? 'fill' : 'line'} text-yellow-400`}
-                    ></i>
-                  ))}
+
+
+
+
+
+
+
+
+
+
+
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-xl font-semibold mb-6">Customer Reviews</h2>
+                <div className="space-y-4">
+                  {reviews.length === 0 ? (
+                    <p className="text-gray-500 text-center py-8">No reviews yet</p>
+                  ) : (
+                    reviews.map((review) => (
+                      <div key={review.id} className="flex items-start justify-between p-4 border border-gray-200 rounded-lg">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <h4 className="font-semibold">{review.customer_name}</h4>
+                            <div className="flex items-center">
+                              {[...Array(5)].map((_, i) => (
+                                <i
+                                  key={i}
+                                  className={`ri-star-${i < review.rating ? 'fill' : 'line'} text-yellow-400 text-sm`}
+                                ></i>
+                              ))}
+                            </div>
+                            {!review.is_approved && (
+                              <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs">
+                                Pending
+                              </span>
+                            )}
+                            {review.is_featured && (
+                              <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs">
+                                Featured
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-gray-600 text-sm">{review.review_text}</p>
+                          <p className="text-xs text-gray-500 mt-1">{new Date(review.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <div className="flex space-x-2">
+                          {!review.is_approved && (
+                            <button
+                              onClick={() => approveReview(review.id)}
+                              className="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer text-xs"
+                            >
+                              Approve
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => deleteReview(review.id)}
+                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
+                          >
+                            Delete Review
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-              </div>
-            </div>
-            <p className="text-gray-600 mb-4">"{review.review_text || review.text || ''}"</p>
-            <p className="text-sm text-gray-500">
-              {review.created_at ? new Date(review.created_at).toLocaleDateString() : ''}
-            </p>
-            {review.is_featured && (
-              <div className="mt-2">
-                <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-semibold">
-                  Featured Review
-                </span>
               </div>
             )}
           </div>
-        ))}
+        )}
+
+{/* Orders Tab */}
+        {activeTab === 'orders' && (
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">All Orders</h2>
+
+            {/* Search + Filters */}
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+              <input
+                type="text"
+                placeholder="Search by Order ID, Customer Name, or Location..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="col-span-1 md:col-span-2 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              />
+
+              <div className="flex space-x-2 items-center">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="p-3 border border-gray-300 
+                  rounded-lg focus:ring-2 focus:ring-orange-500
+                  focus:border-orange-500"
+                
+                
+                >
+                  <option value="all">All statuses</option>
+                  <option value="placed">Placed</option>
+                  <option value="preparing">Preparing</option>
+                  <option value="ready">Ready</option>
+                  <option value="on-the-way">On-the-way</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+
+              </div>
+            </div>
+
+            {/* Filtered Orders */}
+            <div className="space-y-4">
+                {filteredOrders.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8">No matching orders found</p>
+                ) : (
+                filteredOrders.map((order) => (
+                  <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <h3 className="font-semibold">Order #{order.id}</h3>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
+                          {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
+                        </span>
+
+
+
+
+{/* delivery */}
+
+
+
+
+<span className={`text-xs px-2 py-1 rounded-full ${getStatusColor((order?.order_type || 'pickup').toString().toLowerCase())} bg-gray-100`}>
+  {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
+</span>
+
+
+
+
+                      </div>
+                      <p className="text-sm text-gray-600 mb-1">
+                        Customer: {order.customer.firstName} {order.customer.lastName}
+                      </p>
+                      <p className="text-sm text-gray-600 mb-1">
+                        Items: {Array.isArray(order.items) ? order.items.map((item: any) => `${item.quantity}x ${item.name}`).join(', ') : 'N/A'}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Total: ₨{(order.total || 0).toLocaleString()} - {new Date(order.created_at || Date.now()).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+
+
+
+
+
+
+
+                    <button
+                      onClick={() => handleViewOrder(order)}
+                      className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    >
+                      <i className="ri-eye-line"></i>
+                    </button>
+
+{/* 
+                    {order.status !== 'cancelled' && (
+                      <button
+                        onClick={() => handleCancelOrder(order.id)}
+                        className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                      >
+                        <i className="ri-close-circle-line mr-1"></i> Cancel
+                      </button>
+                    )} */}
+
+                  </div>
+
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+
+        {/* Menu Items Tab */}
+        {activeTab === 'menu-items' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-semibold">Menu Items</h2>
+                <button
+                  onClick={() => setShowAddItemModal(true)}
+                  className="bg-orange-600 text-white px-1 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                >
+                  <i className="ri-add-line mr-2"></i>
+                  Add Menu Item
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                {menuItems.length === 0 ? (
+                  <div className="col-span-2 text-center py-8">
+                    <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <i className="ri-restaurant-line text-2xl text-gray-400"></i>
+                    </div>
+                    <p className="text-gray-500 mb-4">No menu items yet</p>
+                    <button
+                      onClick={() => setShowAddItemModal(true)}
+                      className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                    >
+                      Add First Item
+                    </button>
+                  </div>
+                ) : (
+                  menuItems.map((item) => (
+                    <div key={item.id} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center space-x-3">
+                          <img 
+                            src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%22clean%20background&width=120&height=120&seq=menu-item&orientation=squarish'} 
+                            alt={item.name}
+                            className="w-16 h-16 object-cover rounded-lg"
+                          />
+                          <div>
+                            <h3 className="font-semibold">{item.name}</h3>
+                            <p className="text-sm text-gray-600 mb-1">{item.category?.name || 'No Category'}</p>
+                            <p className="text-lg font-bold text-orange-600">₨{item.price}</p>
+                          </div>
+                        </div>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          item.is_available 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {item.is_available ? 'Available' : 'Out of Stock'}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.description}</p>
+
+                      <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                        <span>{item.preparation_time || 15} min prep</span>
+                        {item.is_vegetarian && (
+                          <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                            Vegetarian
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => {
+                            setSelectedItem(item);
+                            setShowEditItemModal(true);
+                          }}
+                          className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                        >
+                          <i className="ri-edit-line"></i>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMenuItem(item.id)}
+                          className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                        >
+                          <i className="ri-delete-bin-line"></i>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Categories Tab */}
+        {/* Categories Tab */}
+        
+        
+        
+        
+        
+        
+{activeTab === "categories" && (
+  <div className="space-y-6">
+    <div className="bg-white rounded-2xl shadow-lg p-6">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-semibold">Menu Categories</h2>
+        <button
+          onClick={() => setShowAddCategoryModal(true)}
+          className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+        >
+          <i className="ri-add-line mr-2"></i>
+          Add Category
+        </button>
       </div>
-    )}
+
+      {/* Category List */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {categories.length === 0 ? (
+          <div className="col-span-3 text-center py-8">
+            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-1">
+              <i className="ri-folder-line text-2xl text-gray-400"></i>
+            </div>
+            <p className="text-gray-500 mb-4">No categories yet</p>
+            <button
+              onClick={() => setShowAddCategoryModal(true)}
+              className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+            >
+              Add First Category
+            </button>
+          </div>
+        ) : (
+          categories.map((category) => {
+            // compute icon source (URL or Supabase publicUrl)
+            let iconSrc: string | null = null;
+            if (category.icon) {
+              if (
+                category.icon.startsWith("http://") ||
+                category.icon.startsWith("https://") ||
+                category.icon.startsWith("data:")
+              ) {
+                iconSrc = category.icon;
+              } else {
+                const { data } = supabase
+                  .storage
+                  .from("menu-images")
+                  .getPublicUrl(category.icon);
+                iconSrc = data?.publicUrl ?? null;
+              }
+            }
+
+            return (
+              <div
+                key={category.id}
+                className="border border-gray-200 rounded-lg p-4"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                      {iconSrc ? (
+                        <img
+                          src={iconSrc}
+                          alt={category.name}
+                          className="w-8 h-8 object-cover rounded-full"
+                          onError={(e) =>
+                            ((e.currentTarget as HTMLImageElement).style.display =
+                              "none")
+                          }
+                        />
+                      ) : (
+                        <i className="ri-restaurant-line text-orange-600"></i>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">{category.name}</h3>
+                      <p className="text-sm text-gray-600">
+                        {
+                          menuItems.filter(
+                            (item) => item.category_id === category.id
+                          ).length
+                        }{" "}
+                        items
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                  {category.description}
+                </p>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleViewCategory(category)}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-eye-line"></i>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedCategory(category);
+                      setShowEditCategoryModal(true);
+                    }}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-edit-line"></i>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCategory(category.id)}
+                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                  >
+                    <i className="ri-delete-bin-line"></i>
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+      </div>
 
 
-    <div className="max-w-2xl mx-auto">
-      <h3 className="text-2xl font-bold text-center mb-8 text-gray-800">
-        Share Your Experience
-      </h3>
-      <ReviewForm onSubmit={addReview} />
+
+
     </div>
+
+
+
+
+
+
+
+
+    
   </div>
 
 
@@ -1026,213 +2960,1409 @@ enriched.sort((a: any, b: any) => {
 
 
 
-</section>
-
-<div className="bg-white rounded-2xl shadow-lg p-8">
-  <h2 className="text-2xl font-semibold mb-6 text-gray-800">Send us a Message</h2>
-  <QuestionForm />
+)}
 
 
+      </div>
 
-
-
-
-
-
-{/* View answered user questions */}
-<div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-  <h2 className="text-2xl font-semibold mb-6 text-gray-800">Visitor Q&A</h2>
-      <ViewQuestions />
-</div>
-
-</div>
-
-
-
-
-
-      {/* Cart Summary */}
-      {getTotalItems() > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-40">
-          <div className="container mx-auto flex justify-between items-center">
-            <div>
-              <span className="font-semibold text-gray-800">{getTotalItems()} items in cart</span>
-              <span className="ml-4 font-bold text-orange-600 text-lg">₨{getTotalPrice().toLocaleString()}</span>
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold">Add New Category</h3>
+              <button
+                onClick={() => setShowAddCategoryModal(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <i className="ri-close-line text-xl"></i>
+              </button>
             </div>
-            <Link href="/cart" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-              View Cart
-            </Link>
+
+            <form 
+              id="addCategoryForm"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target as HTMLFormElement);
+                handleAddCategory({
+                  name: formData.get('name') as string,
+                  description: formData.get('description') as string,
+                  icon: formData.get('icon') as string || 'ri-restaurant-line',
+                  displayOrder: parseInt(formData.get('displayOrder') as string) || 99
+                });
+              }} 
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category Name</label>
+                <input
+                  type="text"
+                  name="name"
+                  placeholder="e.g., Appetizers"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              
+{/* Icon (upload) */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Icon (Optional)</label>
+
+  <div className="flex items-center space-x-3">
+    {/* allow pasting a url directly (user may prefer url) */}
+    <input
+      type="text"
+      name="iconUrl"
+      defaultValue={selectedCategory?.icon ?? ''}
+      placeholder="https://example.com/icon.png (or leave blank to upload)"
+      className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    />
+
+    {/* file picker label */}
+    <label
+      htmlFor="add-category-icon-file"
+      className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+    >
+      <i className="ri-upload-line mr-2"></i>
+      <span className="text-sm">Choose file</span>
+    </label>
+
+    {/* hidden file input — unique id so it doesn't clash with other pickers */}
+    <input
+      id="add-category-icon-file"
+      type="file"
+      accept="image/*"
+      onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+      className="hidden"
+    />
+  </div>
+
+  {/* hidden input that the form will submit as `icon` — we set its value to the uploadedImageUrl (if any) */}
+  <input type="hidden" name="icon" value={uploadedImageUrl ?? ''} />
+
+  {/* Upload controls + preview (reuses your existing upload helpers/state) */}
+  <div className="mt-4">
+    <div className="flex items-center space-x-3">
+      <button
+        type="button"
+        onClick={handleUpload}
+        disabled={uploading || !pickedFile}
+        className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+      >
+        Upload
+      </button>
+
+      <button
+        type="button"
+        onClick={debugUploadRaw}
+        className="px-3 py-2 bg-gray-100 rounded"
+      >
+        Debug Raw
+      </button>
+
+      {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+    </div>
+
+    {/* picked-file preview */}
+    {pickedFile && (
+      <div className="mt-3 flex items-center space-x-4">
+        {previewUrl && <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />}
+        <div>
+          <div className="font-medium">{pickedFile.name}</div>
+          <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+        </div>
+      </div>
+    )}
+
+    {/* uploaded image preview (final URL) */}
+    {uploadedImageUrl && (
+      <div className="mt-3">
+        <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+        <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+      </div>
+    )}
+
+    {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+  </div>
+</div>
+
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="Brief description of this category"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCategoryModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                >
+                  Add Category
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Location Section */}
-      <section className="py-16 bg-white">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Visit Us</h2>
+      {/* Edit Category Modal */}
+      {showEditCategoryModal && selectedCategory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold">Edit Category</h3>
+              <button
+                onClick={() => setShowEditCategoryModal(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <i className="ri-close-line text-xl"></i>
+              </button>
+            </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
-            <div className="bg-gray-50 rounded-2xl p-8">
-              <h3 className="text-xl font-semibold mb-6 text-gray-800">Restaurant Information</h3>
-              <div className="space-y-4">
-                <div className="flex items-start space-x-3">
-                  <i className="ri-restaurant-line text-xl text-orange-600 mt-1"></i>
-                  <div>
-                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Our Restaurant'}</p>
-                    <p className="text-gray-600">Authentic Newari cuisine in Pokhara</p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              handleEditCategory({
+                name: formData.get('name') as string,
+                description: formData.get('description') as string,
+                icon: formData.get('icon') as string,
+                displayOrder: parseInt(formData.get('displayOrder') as string) || 99
+              });
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category Name</label>
+                <input
+                  type="text"
+                  name="name"
+                  defaultValue={selectedCategory.name}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+                  
+{/* Icon (upload) */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Icon (Optional)</label>
+
+  <div className="flex items-center space-x-3">
+    {/* allow pasting a url directly (user may prefer url) */}
+    <input
+      type="text"
+      name="iconUrl"
+      defaultValue={selectedCategory?.icon ?? ''}
+      placeholder="https://example.com/icon.png (or leave blank to upload)"
+      className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    />
+
+    {/* file picker label */}
+    <label
+      htmlFor="add-category-icon-file"
+      className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+    >
+      <i className="ri-upload-line mr-2"></i>
+      <span className="text-sm">Choose file</span>
+    </label>
+
+    {/* hidden file input — unique id so it doesn't clash with other pickers */}
+    <input
+      id="add-category-icon-file"
+      type="file"
+      accept="image/*"
+      onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+      className="hidden"
+    />
+  </div>
+
+  {/* hidden input that the form will submit as `icon` — we set its value to the uploadedImageUrl (if any) */}
+  <input type="hidden" name="icon" value={uploadedImageUrl ?? ''} />
+
+  {/* Upload controls + preview (reuses your existing upload helpers/state) */}
+  <div className="mt-4">
+    <div className="flex items-center space-x-3">
+      <button
+        type="button"
+        onClick={handleUpload}
+        disabled={uploading || !pickedFile}
+        className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+      >
+        Upload
+      </button>
+
+      <button
+        type="button"
+        onClick={debugUploadRaw}
+        className="px-3 py-2 bg-gray-100 rounded"
+      >
+        Debug Raw
+      </button>
+
+      {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+    </div>
+
+    {/* picked-file preview */}
+    {pickedFile && (
+      <div className="mt-3 flex items-center space-x-4">
+        {previewUrl && <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />}
+        <div>
+          <div className="font-medium">{pickedFile.name}</div>
+          <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+        </div>
+      </div>
+    )}
+
+    {/* uploaded image preview (final URL) */}
+    {uploadedImageUrl && (
+      <div className="mt-3">
+        <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+        <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+      </div>
+    )}
+
+    {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+  </div>
+</div>
+
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  defaultValue={selectedCategory.description}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowEditCategoryModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                >
+                  Update Category
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Menu Item Modal */}
+      {showAddItemModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold">Add New Menu Item</h3>
+              <button
+                onClick={() => setShowAddItemModal(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <i className="ri-close-line text-xl"></i>
+              </button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              handleAddMenuItem({
+                categoryId: formData.get('categoryId') as string,
+                name: formData.get('name') as string,
+                description: formData.get('description') as string,
+                price: parseFloat(formData.get('price') as string),
+                imageUrl: uploadedImageUrl || (formData.get('imageUrl') as string || ''),
+                ingredients: formData.get('ingredients') as string,
+                isVegetarian: formData.get('isVegetarian') === 'on',
+                preparationTime: parseInt(formData.get('preparationTime') as string) || 15,
+                isAvailable: formData.get('isAvailable') !== 'off'
+              });
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <select
+                  name="categoryId"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
+                  required
+                >
+                  <option value="">Select Category</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+                <input
+                  type="text"
+                  name="name"
+                  placeholder="e.g., Chicken Momo"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="Brief description of the dish"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Price (₨)</label>
+                  <input
+                    type="number"
+                    name="price"
+                    min="0"
+                    step="1"
+                    placeholder="250"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Prep Time (min)</label>
+                  <input
+                    type="number"
+                    name="preparationTime"
+                    min="1"
+                    defaultValue="15"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                </div>
+              </div>
+
+
+
+
+<div className="mt-4">
+  <label className="block text-sm font-medium text-gray-700 mb-2">Image (URL or upload)</label>
+
+<input
+  ref={fileInputRef}
+  type="file"
+  accept="image/*"
+  onChange={handleFileInputChange} // <-- typed handler
+  className="mb-2"
+/>
+
+
+  {previewUrl && (
+    <img src={previewUrl} alt="preview" className="w-40 h-28 object-cover rounded mb-2" />
+  )}
+
+  <div className="flex items-center space-x-2">
+    <button
+      type="button"
+      onClick={handleUpload}
+      disabled={!pickedFile || uploading}
+      className="px-4 py-2 bg-orange-600 text-white rounded"
+    >
+      {uploading ? 'Uploading…' : 'Upload & Compress'}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setPickedFile(null); setPreviewUrl(null); setUploadedImageUrl(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }}
+      className="px-3 py-2 border rounded"
+    >
+      Clear
+    </button>
+  </div>
+
+  {uploadedImageUrl && (
+    <p className="text-sm text-green-600 mt-2">
+      Uploaded: <a href={uploadedImageUrl} target="_blank" rel="noreferrer" className="underline">{uploadedImageUrl}</a>
+    </p>
+  )}
+  {uploadError && <p className="text-sm text-red-600 mt-2">{uploadError}</p>}
+</div>
+
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients (Optional)</label>
+                <input
+                  type="text"
+                  name="ingredients"
+                  placeholder="Chicken, flour, onions, spices"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                />
+              </div>
+              
+              <div className="flex items-center space-x-6">
+                <label className="flex items-center">
+                  <input type="checkbox" name="isVegetarian" className="mr-2 w-4 h-4 text-orange-600" />
+                  <span className="text-sm">Vegetarian</span>
+                </label>
+                <label className="flex items-center">
+                  <input type="checkbox" name="isAvailable" defaultChecked className="mr-2 w-4 h-4 text-orange-600" />
+                  <span className="text-sm">Available</span>
+                </label>
+              </div>
+              
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowAddItemModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                >
+                  Add Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Menu Item Modal */}
+     
+
+
+
+
+
+
+
+{showEditItemModal && selectedItem && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-semibold">Edit Menu Item</h3>
+        <button
+          onClick={() => setShowEditItemModal(false)}
+          className="text-gray-400 hover:text-gray-600 cursor-pointer"
+          aria-label="Close edit modal"
+        >
+          <i className="ri-close-line text-xl"></i>
+        </button>
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.target as HTMLFormElement);
+          handleEditMenuItem({
+            categoryId: formData.get('categoryId') as string,
+            name: (formData.get('name') as string) || '',
+            description: (formData.get('description') as string) || '',
+            price: parseFloat(formData.get('price') as string),
+            // prefer uploadedImageUrl if available, otherwise use the URL from input, otherwise empty string
+            imageUrl: uploadedImageUrl || (formData.get('imageUrl') as string) || '',
+
+            ingredients: (formData.get('ingredients') as string) || '',
+            isVegetarian: formData.get('isVegetarian') === 'on',
+            preparationTime: parseInt(formData.get('preparationTime') as string) || 15,
+            isAvailable: formData.get('isAvailable') === 'on',
+            // include id so handler knows which to update
+            id: selectedItem.id
+          });
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+          <select
+            name="categoryId"
+            defaultValue={selectedItem.category_id ?? ''}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
+            required
+          >
+            <option value="">Select Category</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+          <input
+            type="text"
+            name="name"
+            defaultValue={selectedItem.name}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+          <textarea
+            name="description"
+            rows={3}
+            defaultValue={selectedItem.description}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Price (₨)</label>
+            <input
+              type="number"
+              name="price"
+              min="0"
+              step="1"
+              defaultValue={selectedItem.price}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Prep Time (min)</label>
+            <input
+              type="number"
+              name="preparationTime"
+              min="1"
+              defaultValue={selectedItem.preparation_time}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            />
+          </div>
+        </div>
+
+        {/* Image URL + file upload */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Image URL (Optional)</label>
+
+          <div className="flex items-center space-x-3">
+            <input
+              type="url"
+              name="imageUrl"
+              defaultValue={selectedItem.image_url ?? ''}
+              placeholder="https://example.com/image.jpg"
+              className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            />
+
+            {/* file upload label (click opens file picker) */}
+            <label
+              htmlFor="edit-item-file"
+              className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+            >
+              <i className="ri-upload-line mr-2"></i>
+              <span className="text-sm">Choose file</span>
+            </label>
+
+            {/* actual hidden file input */}
+            <input
+              id="edit-item-file"
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+          </div>
+
+          {/* Upload controls & preview area */}
+          <div className="mt-4">
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={handleUpload}
+                disabled={uploading || !pickedFile}
+                className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+              >
+                Upload
+              </button>
+              <button
+                type="button"
+                onClick={debugUploadRaw}
+                className="px-3 py-2 bg-gray-100 rounded"
+              >
+                Debug Raw
+              </button>
+
+              {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+            </div>
+
+            {/* picked-file preview */}
+            {pickedFile && (
+              <div className="mt-3 flex items-center space-x-4">
+                {previewUrl && (
+                  <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />
+                )}
+                <div>
+                  <div className="font-medium">{pickedFile.name}</div>
+                  <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+                </div>
+              </div>
+            )}
+
+            {/* uploaded image preview (final URL) */}
+            {uploadedImageUrl && (
+              <div className="mt-3">
+                <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+                <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+              </div>
+            )}
+
+            {/* upload error */}
+            {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients (Optional)</label>
+          <input
+            type="text"
+            name="ingredients"
+            defaultValue={selectedItem.ingredients ?? ''}
+            placeholder="Chicken, flour, onions, spices"
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+          />
+        </div>
+
+        <div className="flex items-center space-x-6">
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              name="isVegetarian"
+              defaultChecked={selectedItem.is_vegetarian}
+              className="mr-2 w-4 h-4 text-orange-600"
+            />
+            <span className="text-sm">Vegetarian</span>
+          </label>
+
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              name="isAvailable"
+              defaultChecked={selectedItem.is_available}
+              className="mr-2 w-4 h-4 text-orange-600"
+            />
+            <span className="text-sm">Available</span>
+          </label>
+        </div>
+
+        <div className="flex space-x-3 pt-4">
+          <button
+            type="button"
+            onClick={() => setShowEditItemModal(false)}
+            className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+          >
+            Update Item
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
+
+
+
+
+
+
+
+
+
+
+      {/* Owner Settings Modal */}
+      {showOwnerPanel && userType === 'superadmin' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-800">Owner Settings</h2>
+                <button
+                  onClick={() => setShowOwnerPanel(false)}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <i className="ri-close-line text-2xl"></i>
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Restaurant Info */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold">Restaurant Information</h3>
+                    <button
+                      onClick={() => setShowRestaurantInfoModal(true)}
+                      className="text-orange-600 hover:text-orange-700 cursor-pointer"
+                    >
+                      <i className="ri-edit-line"></i>
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-sm">
+
+                    
+                    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
+                    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
+                    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
+                    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
+                  
+                  
+                  
                   </div>
                 </div>
-                <div className="flex items-start space-x-3">
-                  <i className="ri-map-pin-line text-xl text-orange-600 mt-1"></i>
-                  <div>
-                    <p className="font-semibold text-gray-800">Address</p>
-                    <p className="text-gray-600">{restaurant_info?.address ?? 'Address not set'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <i className="ri-phone-line text-xl text-orange-600"></i>
-                  <div>
-                    <p className="font-semibold text-gray-800">Phone</p>
-<a
-  href={restaurant_info?.phone ? `tel:${restaurant_info.phone}` : '#'}
-  className="text-orange-600 hover:text-orange-700 cursor-pointer"
-  onClick={(e) => { if (!restaurant_info?.phone) e.preventDefault(); }}
->
-  {restaurant_info?.phone ?? 'Phone not set'}
-</a>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <i className="ri-mail-line text-xl text-orange-600"></i>
-                  <div>
-                    <p className="font-semibold text-gray-800">Email</p>
-<a
-  href={restaurant_info?.email ? `mailto:${restaurant_info.email}` : '#'}
-  className="text-orange-600 hover:text-orange-700 cursor-pointer"
-  onClick={(e) => { if (!restaurant_info?.email) e.preventDefault(); }}
->
-  {restaurant_info?.email ?? 'Email not set'}
-</a>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <i className="ri-time-line text-xl text-orange-600 mt-1"></i>
-                  <div>
-                    <p className="font-semibold text-gray-800">Opening Hours</p>
-                    <p className="text-gray-600">Daily: 9:00 AM - 10:00 PM</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+{/* Admin Management */}
+<div className="bg-gray-50 rounded-lg p-4">
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-lg font-semibold">Admin Management</h3>
+    <button
+      onClick={() => { setEditingAdmin(null); setShowAdminModal(true); }}
+      className="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 cursor-pointer text-sm"
+    >
+      Add Admin
+    </button>
+  </div>
+
+  {operationError && (
+    <div className="mb-3 text-sm text-red-600">{operationError}</div>
+  )}
+
+  <div className="space-y-2">
+    {loadingAdmins ? (
+      <p className="text-gray-500 text-sm">Loading admins...</p>
+    ) : admins.length === 0 ? (
+      <p className="text-gray-500 text-sm">No admins added yet</p>
+    ) : (
+      admins.map((admin: any) => (
+        <div key={admin.id} className="flex justify-between items-center bg-white p-3 rounded-lg">
+          <div>
+            <p className="font-medium text-sm">
+              {admin.first_name || admin.name || `${admin.first_name ?? ""} ${admin.last_name ?? ""}`.trim() || "Admin"}
+            </p>
+            <p className="text-xs text-gray-500">{admin.email}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setEditingAdmin(admin); setShowAdminModal(true); }}
+              className="text-indigo-600 hover:text-indigo-700 cursor-pointer text-sm"
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={() => removeAdmin(admin.id)}
+              className="text-red-600 hover:text-red-700 cursor-pointer"
+            >
+              <i className="ri-delete-bin-line"></i>
+            </button>
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+                {/* Review Management Summary */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold mb-2">Review Management</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-green-600">{reviews.filter(r => r.approved).length}</p>
+                      <p className="text-gray-600">Approved</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-yellow-600">{reviews.filter(r => !r.approved).length}</p>
+                      <p className="text-gray-600">Pending</p>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-<div
-  className="aspect-video rounded-2xl overflow-hidden cursor-pointer"
-  onClick={() => {
-    if (restaurant_info?.coordinates) {
-      window.open(`https://www.google.com/maps/place/${restaurant_info.coordinates}`, '_blank');
-    } else {
-      // optional: show message or do nothing
-      console.warn('No coordinates available');
+      {/* Restaurant Info Modal */}
+      {showRestaurantInfoModal && restaurantInfo ? (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold">Edit Restaurant Info</h3>
+              <button
+                onClick={() => setShowRestaurantInfoModal(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <i className="ri-close-line text-xl"></i>
+              </button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+// add id from restaurantInfo so function updates instead of inserting
+updateRestaurantInfo({
+  id: restaurantInfo?.id ?? null,
+  name: String(formData.get('name') ?? ''),
+  phone: String(formData.get('phone') ?? ''),
+  email: String(formData.get('email') ?? ''),
+  address: String(formData.get('address') ?? ''),
+  coordinates: String(formData.get('coordinates') ?? '')
+});
+
+
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Restaurant Name</label>
+                <input
+                  type="text"
+                  name="name"
+                  defaultValue={restaurantInfo?.name ?? '-'}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                <input
+                  type="tel"
+                  name="phone"
+                  defaultValue={restaurantInfo?.phone ?? '-'}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  name="email"
+                  defaultValue={restaurantInfo?.email ?? '-'}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                <input
+                  type="text"
+                  name="address"
+                  defaultValue={restaurantInfo?.address ?? '-'}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Coordinates (lat, lng)</label>
+                <input
+                  type="text"
+                  name="coordinates"
+                  defaultValue={restaurantInfo?.coordinates ?? '-'}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  placeholder="28.22886241546525, 83.99098268394296"
+                  required
+                />
+              </div>
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowRestaurantInfoModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                >
+                  Update
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ): null}
+
+
+
+
+
+
+{/* Add Admin Modal */}
+{showAdminModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-semibold">Add New Admin</h3>
+        <button
+          onClick={() => setShowAdminModal(false)}
+          className="text-gray-400 hover:text-gray-600 cursor-pointer"
+        >
+          <i className="ri-close-line text-xl"></i>
+        </button>
+      </div>
+
+
+
+
+
+<form
+  onSubmit={async (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const fd = new FormData(form);
+
+      const first_name = (fd.get("first_name") as string || "").trim();
+      const last_name = (fd.get("last_name") as string || "").trim();
+      const email = (fd.get("email") as string || "").trim();
+      const password = (fd.get("password") as string || "").trim();
+      const phone = (fd.get("phone") as string || "").trim();
+      const role = (fd.get("role") as string || "").trim() || "admin";
+      const user_type = (fd.get("user_type") as string || "").trim() || role;
+
+      const address_street = (fd.get("address_street") as string || "").trim();
+      const address_city = (fd.get("address_city") as string || "").trim();
+      const address_state = (fd.get("address_state") as string || "").trim();
+      const address_zip_code = (fd.get("address_zip_code") as string || "").trim();
+
+      const isEdit = !!(editingAdmin && editingAdmin.id);
+      if (!email) { alert("Email is required."); return; }
+      if (!isEdit && !password) { alert("Password is required for new admin."); return; }
+
+      const payload: any = {
+        first_name: first_name || null,
+        last_name: last_name || null,
+        email,
+        phone: phone || null,
+        role,
+        user_type,
+        // include flat address fields; handleAdminSave will convert them
+        address_street: address_street || null,
+        address_city: address_city || null,
+        address_state: address_state || null,
+        address_zip_code: address_zip_code || null,
+      };
+
+      if (!isEdit) payload.password = password;
+      else {
+        payload.id = editingAdmin.id;
+        if (password) payload.password = password;
+      }
+
+      // hand-off to universal save (converts address -> address object)
+      await handleAdminSave(payload);
+
+      // UI cleanup (handleAdminSave already closes modal on success)
+    } catch (err: any) {
+      console.error("Admin add/edit submit error:", err);
+      setOperationError(err?.message ?? "Failed to save admin");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
     }
   }}
+  className="space-y-4"
 >
-  <iframe
-    src={restaurant_info?.coordinates
-      ? `https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d219.70586196168153!2d83.9908873!3d28.2287612!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x399595c315c578db%3A0x4c21b4257a106489!2sNewari%20Bhatti%20and%20Kathmandu%20momo%20ghar!5e0!3m2!1sen!2snp!4v1757060425626!5m2!1sen!2snp`
-      : 'about:blank'
-    }
-    width="100%"
-    height="100%"
-    style={{ border: 0 }}
-    allowFullScreen
-    loading="lazy"
-    referrerPolicy="no-referrer-when-downgrade"
-    title={restaurant_info?.name ? `${restaurant_info.name} Location` : 'Location'}
+
+
+
+
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">First name</label>
+    <input
+      type="text"
+      name="first_name"
+      defaultValue={editingAdmin?.first_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ')[0] : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="First name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Last name</label>
+    <input
+      type="text"
+      name="last_name"
+      defaultValue={editingAdmin?.last_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ').slice(1).join(' ') : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="Last name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+    <input
+      type="email"
+      name="email"
+      defaultValue={editingAdmin?.email ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="email@example.com"
+      required
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Password {editingAdmin ? <span className="text-xs text-gray-500">(leave blank to keep)</span> : null}</label>
+    <input
+      type="password"
+      name="password"
+      defaultValue={''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder={editingAdmin ? 'Leave blank to keep current password' : 'Choose a strong password'}
+      // do not set required here; we validate above based on isEdit
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+    <input
+      type="tel"
+      name="phone"
+      defaultValue={editingAdmin?.phone ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="9876543210"
+    />
+  </div>
+
+  <div className="grid grid-cols-2 gap-3">
+    <select name="role" defaultValue={editingAdmin?.role ?? 'admin'} className="p-3 border rounded-lg">
+      <option value="admin">Admin</option>
+      <option value="superadmin">Superadmin</option>
+      <option value="user">User</option>
+    </select>
+
+    <input type="hidden" name="user_type" defaultValue={editingAdmin?.user_type ?? (editingAdmin?.role ?? 'admin')} />
+  </div>
+
+
+
+
+
+
+
+
+
+
+
+
+{/* Address (prefill from editingAdmin.address) */}
+<div>
+  <label className="block text-sm font-medium mb-2">Street</label>
+  <input
+    type="text"
+    name="address_street"
+    defaultValue={editingAdmin?.address?.street ?? editingAdmin?.address_street ?? ""}
+    placeholder="Street"
+    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+</div>
+<div className="grid grid-cols-3 gap-3">
+  <input
+    type="text"
+    name="address_city"
+    placeholder="City"
+    defaultValue={editingAdmin?.address?.city ?? editingAdmin?.address_city ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_state"
+    placeholder="State"
+    defaultValue={editingAdmin?.address?.state ?? editingAdmin?.address_state ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_zip_code"
+    placeholder="Zip Code"
+    defaultValue={editingAdmin?.address?.zip ?? editingAdmin?.address_zip_code ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
   />
 </div>
 
 
-          </div>
-        </div>
-      </section>
 
-      {/* Footer */}
-      <footer className="bg-gray-800 text-white py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center space-x-2 mb-4">
-                <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
-                  <i className="ri-restaurant-line text-white text-lg"></i>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  {/* Actions */}
+  <div className="flex space-x-3 pt-4">
+    <button
+      type="button"
+      onClick={() => { setShowAdminModal(false); setEditingAdmin(null); }}
+      className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer"
+    >
+      Cancel
+    </button>
+    <button
+      type="submit"
+      className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer"
+    >
+      {editingAdmin ? 'Update Admin' : 'Add Admin'}
+    </button>
+  </div>
+</form>
+
+
+
+
+
+
+    </div>
+  </div>
+)}
+
+      {/* Category Modal */}
+{showCategoryModal && selectedCategory && (() => {
+  // compute selected category icon src (same logic)
+  const selRaw = selectedCategory.icon ?? '';
+  let selectedIconSrc: string | null = (typeof categoryIconMap !== 'undefined') ? categoryIconMap[selectedCategory.id] : null;
+
+  if (!selectedIconSrc && selRaw) {
+    if (typeof selRaw === 'string' && (selRaw.startsWith('http://') || selRaw.startsWith('https://') || selRaw.startsWith('data:'))) {
+      selectedIconSrc = selRaw;
+    } else {
+      try {
+        const { data } = supabase.storage.from('menu-images').getPublicUrl(String(selRaw));
+        selectedIconSrc = data?.publicUrl ?? null;
+      } catch (err) {
+        console.warn('getPublicUrl error for selected category', selRaw, err);
+        selectedIconSrc = null;
+      }
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Category Details</h2>
+            <button
+              onClick={() => setShowCategoryModal(false)}
+              className="text-gray-400 hover:text-gray-600 cursor-pointer"
+            >
+              <i className="ri-close-line text-2xl"></i>
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                  {selectedIconSrc ? (
+                    <img
+                      src={selectedIconSrc}
+                      alt={selectedCategory.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <i className={`${selectedCategory.icon || 'ri-restaurant-line'} text-3xl text-orange-600`}></i>
+                  )}
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti & Kathmandu Momo Ghar</span>
+
+                <div>
+                  <h3 className="text-xl font-semibold">{selectedCategory.name}</h3>
+                  <p className="text-gray-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id).length} items in this category
+                  </p>
+                </div>
               </div>
-              <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold mb-4">Quick Links</h4>
-              <ul className="space-y-2">
-                <li><Link href="/menu" className="text-gray-400 hover:text-orange-400 cursor-pointer">Menu</Link></li>
-                <li><Link href="/orders" className="text-gray-400 hover:text-orange-400 cursor-pointer">Track Order</Link></li>
-                <li><Link href="/contact" className="text-gray-400 hover:text-orange-400 cursor-pointer">Contact Us</Link></li>
-                <li><Link href="/terms" className="text-gray-400 hover:text-orange-400 cursor-pointer">Terms of Service</Link></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold mb-4">Contact Info</h4>
-              <div className="space-y-2 text-gray-400">
-                
-<p className="flex items-center">
-  <i className="ri-phone-line mr-2"></i>
-  <a
-    href={restaurant_info?.phone ? `tel:${restaurant_info.phone}` : '#'}
-    className="hover:text-orange-400 cursor-pointer"
-    onClick={(e) => { if (!restaurant_info?.phone) e.preventDefault(); }}
-  >
-    {restaurant_info?.phone ?? 'Phone not set'}
-  </a>
-</p>
 
+              <p className="text-gray-600 mb-4">{selectedCategory.description}</p>
 
-
-<p className="flex items-center">
-  <i className="ri-mail-line mr-2"></i>
-  <a
-    href={restaurant_info?.email ? `mailto:${restaurant_info.email}` : '#'}
-    className="hover:text-orange-400 cursor-pointer"
-    onClick={(e) => { if (!restaurant_info?.email) e.preventDefault(); }}
-  >
-    {restaurant_info?.email ?? 'Email not set'}
-  </a>
-</p>
-
-
-<p className="flex items-center">
-  <i className="ri-map-pin-line mr-2"></i>
-  {restaurant_info?.address ?? 'Address not set'}
-</p>
-
-
+              <div className="grid grid-cols-2 gap-4 text-center">
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-2xl font-bold text-blue-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id).length}
+                  </p>
+                  <p className="text-sm text-gray-600">Total Items</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id && item.is_available).length}
+                  </p>
+                  <p className="text-sm text-gray-600">Available Items</p>
+                </div>
               </div>
             </div>
+
             <div>
-              <h4 className="text-lg font-semibold mb-4">Follow Us</h4>
-              <div className="flex space-x-4">
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-facebook-fill text-white"></i>
-                </a>
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-instagram-line text-white"></i>
-                </a>
+              <h4 className="text-lg font-semibold mb-3">Items in this Category</h4>
+              <div className="space-y-3">
+                {(() => {
+                  const categoryItems = menuItems.filter(item => item.category_id === selectedCategory.id);
+
+                  if (categoryItems.length === 0) {
+                    return (
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <i className="ri-shopping-bag-line text-2xl text-gray-400"></i>
+                        </div>
+                        <p className="text-gray-500 mb-4">No items in this category yet</p>
+                        <button
+                          onClick={() => {
+                            setShowCategoryModal(false);
+                            setShowAddItemModal(true);
+                          }}
+                          className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                        >
+                          Add First Item
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return categoryItems.map((item: any) => (
+                    <div key={item.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-center space-x-4">
+                        <img
+                          src={item.image_url || 'https://via.placeholder.com/120x120?text=Dish'}
+                          alt={item.name}
+                          className="w-12 h-12 object-cover rounded-lg"
+                        />
+                        <div>
+                          <h5 className="font-semibold">{item.name}</h5>
+                          <p className="text-sm text-gray-600">₨{item.price}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-2 py-1 rounded-full text-xs ${item.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {item.is_available ? 'Available' : 'Out of Stock'}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setSelectedItem(item);
+                            setShowCategoryModal(false);
+                            setShowEditItemModal(true);
+                          }}
+                          className="text-orange-600 hover:text-orange-700 cursor-pointer"
+                        >
+                          <i className="ri-edit-line"></i>
+                        </button>
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
+            </div>
+
+            <div className="flex space-x-4">
+              <button
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  setShowAddItemModal(true);
+                }}
+                className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+              >
+                Add New Item
+              </button>
+              <button
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  setShowEditCategoryModal(true);
+                }}
+                className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+              >
+                Edit Category
+              </button>
             </div>
           </div>
-
-<div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-  <p>&copy; 2024 {restaurant_info?.name ?? 'Our Restaurant'}. All rights reserved.</p>
-</div>
         </div>
-      </footer>
+      </div>
+    </div>
+  );
+})()}
+
+
+      {/* Order Modal */}
+      <OrderModal
+        isOpen={showOrderModal}
+        onClose={() => setShowOrderModal(false)}
+        order={selectedOrder}
+        onStatusUpdate={handleStatusUpdate}
+      />
     </div>
   );
 }
