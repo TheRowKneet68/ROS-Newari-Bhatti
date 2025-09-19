@@ -52,90 +52,102 @@ export default function RegisterPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateForm()) return;
 
-    setIsLoading(true);
-    setErrors({});
 
-    try {
-      // 1) Count users in DB to decide first user type (superadmin) vs user
-      const { count: usersCount, error: countError } = await supabase
-        .from('users')
-        .select('id', { count: 'exact', head: true });
 
-      if (countError) throw countError;
 
-      // If no rows exist, usersCount === 0 -> make first user superadmin
-      const user_type = (typeof usersCount === 'number' && usersCount === 0) ? 'superadmin' : 'user';
 
-      // Normalise address shape for DB: use `zip` property in jsonb (your DB shows "zip")
-      const addressForDb = {
-        street: formData.address.street || null,
-        city: formData.address.city || null,
-        state: formData.address.state || null,
-        zip: formData.address.zipCode || null,
-      };
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!validateForm()) return;
 
-      // 2) Create user in Supabase Auth (signUp) with metadata
-      // supabase-js v2 uses options.data (user_metadata) for metadata
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            role: user_type, // store role in metadata (still enforce server-side)
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            phone: formData.phone,
-            address: addressForDb,
-          },
+  setIsLoading(true);
+  setErrors({});
+
+  try {
+    // Normalize address shape for DB
+    const addressForDb = {
+      street: formData.address.street || null,
+      city: formData.address.city || null,
+      state: formData.address.state || null,
+      zip: formData.address.zipCode || null,
+    };
+
+    // Create user in Supabase Auth (signUp)
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: formData.email,
+      password: formData.password,
+      options: {
+        data: {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+          address: addressForDb,
         },
-      });
+      },
+    });
 
-      if (authError) throw authError;
-      if (!authData?.user?.id) throw new Error('Registration failed: no user returned from auth');
+    if (authError) throw authError;
+    if (!authData?.user?.id) throw new Error('Registration failed: no user returned from auth');
 
-      // 3) Insert the user row into your users table with the same auth UID
-      const { error: insertError } = await supabase.from('users').insert({
-        id: authData.user.id, // use the auth UID
-        email: formData.email,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        phone: formData.phone,
-        // write JSON address (jsonb)
-        address: addressForDb,
-        // write flattened address columns for legacy compatibility
-        address_street: addressForDb.street,
-        address_city: addressForDb.city,
-        address_state: addressForDb.state,
-        address_zip_code: addressForDb.zip,
-        // set server-visible user type / role columns (frontend fallback)
-        user_type,
-        role: user_type,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+    const userId = authData.user.id;
 
-      if (insertError) {
-        // If DB insert fails, you might want to rollback the auth user — consider handling that in production.
-        throw insertError;
-      }
+    // Insert into users table (role/user_type will be set by DB default + policies)
+    const { error: insertError } = await supabase.from('users').insert({
+      id: userId,
+      email: formData.email,
+      first_name: formData.firstName,
+      last_name: formData.lastName,
+      phone: formData.phone,
+      address: addressForDb,
+      address_street: addressForDb.street,
+      address_city: addressForDb.city,
+      address_state: addressForDb.state,
+      address_zip_code: addressForDb.zip,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
 
-      // 4) Redirect user according to user_type
-      if (user_type === 'superadmin') {
-        router.push('/dashboard');
-      } else {
-        router.push('/menu');
-      }
-    } catch (err: any) {
-      console.error('Registration error:', err);
-      setErrors({ general: err?.message || 'Registration failed. Please try again.' });
-    } finally {
-      setIsLoading(false);
+    if (insertError) throw insertError;
+
+    // 🔑 Fetch back the user row to check user_type
+    const { data: userRow, error: fetchError } = await supabase
+      .from('users')
+      .select('user_type')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.warn('Could not fetch user_type, defaulting redirect to /menu');
+      router.push('/menu');
+      return;
     }
-  };
+
+    const userType = userRow?.user_type || 'user';
+
+    // Redirect based on role
+    if (userType === 'admin' || userType === 'superadmin') {
+      router.push('/dashboard');
+    } else {
+      router.push('/menu');
+    }
+  } catch (err: any) {
+    console.error('Registration error:', err);
+    setErrors({ general: err?.message || 'Registration failed. Please try again.' });
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
 
   return (
     <div className="min-h-screen bg-gray-50">
