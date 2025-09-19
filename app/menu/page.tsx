@@ -100,13 +100,105 @@ function MenuContent() {
       });
 
       const data = await response.json();
-      if (data.success) {
-        const allCategory = { id: 'all', name: 'All Items'};
-        setCategories([allCategory, ...data.categories]);
-        setMenuItems(data.menuItems);
 
-        localStorage.setItem('menuItems', JSON.stringify(data.menuItems));
-      }
+
+if (data.success) {
+  const allCategory = { id: 'all', name: 'All Items' };
+
+  // items array (safe)
+  const items = Array.isArray(data.menuItems) ? data.menuItems : [];
+
+  // Build categories (keep counts)
+  const categoriesWithCounts = [(allCategory), ...(data.categories || []).map((cat: any) => ({
+    ...cat,
+    count: items.filter((it: any) => String(it.category_id) === String(cat.id)).length
+  }))];
+  setCategories(categoriesWithCounts);
+
+  // --- robust parsing & flag derivation ---
+  const parseTimeSafe = (v: any): number => {
+    if (!v && v !== 0) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const asNum = Number(v);
+      if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+      const asDate = Date.parse(v);
+      if (!Number.isNaN(asDate)) return asDate;
+      return 0;
+    }
+    try {
+      const cast = new Date(v as any).getTime();
+      return Number.isNaN(cast) ? 0 : cast;
+    } catch {
+      return 0;
+    }
+  };
+
+  const deriveFlagsForItem = (item: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+    const createdRaw = item.created_at ?? null;
+    const updatedRaw = item.updated_at ?? null;
+
+    const created = parseTimeSafe(createdRaw);
+    const updated = parseTimeSafe(updatedRaw);
+
+    const isEdited = typeof item.isEdited === 'boolean'
+      ? !!item.isEdited
+      : (updated > 0 && created > 0 && updated !== created);
+
+    const isNew = typeof item.isNew === 'boolean'
+      ? !!item.isNew
+      : (created > 0 && (now - created) <= newThresholdMs);
+
+    const lastChanged = Math.max(created || 0, updated || 0);
+
+    return { created, updated, isEdited, isNew, lastChanged };
+  };
+
+  const now = Date.now();
+  const NEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days; adjust if you want
+
+  const enriched = items.map((it: any) => {
+    const meta = deriveFlagsForItem(it, now, NEW_THRESHOLD_MS);
+    return { ...it, __meta: meta };
+  });
+
+  // --- sort: priority new/edited first, then lastChanged desc (newest first) ---
+  enriched.sort((a: any, b: any) => {
+    const A = a.__meta ?? {};
+    const B = b.__meta ?? {};
+
+    const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+    const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+    if (aPriority !== bPriority) return bPriority - aPriority; // higher priority first
+
+    const aLast = Number(A.lastChanged || 0);
+    const bLast = Number(B.lastChanged || 0);
+    if (bLast !== aLast) return bLast - aLast;
+
+    const aCreated = Number(A.created || 0);
+    const bCreated = Number(B.created || 0);
+    if (bCreated !== aCreated) return bCreated - aCreated;
+
+    // final fallback: numeric id descending (newer id first) or string fallback
+    const aIdNum = Number(a.id);
+    const bIdNum = Number(b.id);
+    if (!Number.isNaN(aIdNum) && !Number.isNaN(bIdNum)) {
+      return bIdNum - aIdNum;
+    }
+    return String(b.id || '').localeCompare(String(a.id || ''));
+  });
+
+  // set state & cache sorted enriched items
+  setMenuItems(enriched.map((i: any) => i));
+  try {
+    localStorage.setItem('menuItems', JSON.stringify(enriched));
+  } catch (e) {
+    console.warn('Unable to cache menu items', e);
+  }
+}
+
+
+
     } catch (error) {
       console.error('Error loading menu data:', error);
     }
