@@ -43,6 +43,17 @@ const [showOnlyFeatured, setShowOnlyFeatured] = useState<boolean>(false);
   const pollIntervalRef = useRef<number | null>(null);
   const lastCancelledCountRef = useRef<number | null>(null);
 
+const [catSearchTerm, setCatSearchTerm] = useState('');
+const [catSearchScope, setCatSearchScope] = useState<'all'|'name'|'description'|'items'>('all');
+
+
+
+
+const [searchScope, setSearchScope] = useState<'all'|'name'|'category'>('all');
+
+
+
+
   // audio refs for beep
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -2465,6 +2476,11 @@ const handleAdminSave = async (payload: any) => {
             {/* Stats Cards */}
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white rounded-2xl shadow-lg p-6">
+                
+                
+                
+                
+                
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm">Total Orders</p>
@@ -2844,13 +2860,48 @@ const handleAdminSave = async (payload: any) => {
  
 
 {/* Menu Items Tab */}
+
+{/* Menu Items Tab */}
 {activeTab === 'menu-items' && (
   <div className="space-y-6">
     <div className="bg-white rounded-2xl shadow-lg p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Menu Items</h2>
+              <div>
+          <h2 className="text-xl font-semibold">Menu Items</h2>
+          <p className="text-sm text-gray-500">Manage your menu — search, feature, edit or remove items.</p>
+        </div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+
 
         <div className="flex items-center space-x-3">
+          {/* Search input + scope */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search items..."
+              className="bg-transparent px-2 py-2 text-sm outline-none w-60"
+            />
+            <select
+              value={searchScope}
+              onChange={(e) => setSearchScope(e.target.value as 'all' | 'name' | 'category')}
+              className="text-sm bg-transparent border-l pl-2 ml-2 outline-none"
+              title="Search scope"
+            >
+              <option value="all">All</option>
+              <option value="name">Name</option>
+              <option value="category">Category</option>
+            </select>
+
+            <button
+              title="Clear search"
+              onClick={() => { setSearchTerm(''); setSearchScope('all'); }}
+              className="ml-2 px-2 py-1 rounded text-sm text-gray-600 hover:bg-gray-100"
+            >
+              ✕
+            </button>
+          </div>
+
           {/* Featured filter toggle */}
           <button
             type="button"
@@ -2887,121 +2938,140 @@ const handleAdminSave = async (payload: any) => {
             </button>
           </div>
         ) : (
-          // filter locally if showOnlyFeatured set
-          (showOnlyFeatured ? menuItems.filter((m: any) => !!m.featured) : menuItems).map((item: any) => (
-            <div key={item.id} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center space-x-3">
-                  <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
-                    <img
-                      src={item.image_url || item.image || '/images/placeholder-food.png'}
-                      alt={item.name}
-                      className="max-w-full max-h-full object-contain object-center"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
-                    />
-                  </div>
+          // --- filtering logic (search + featured) ---
+          (() => {
+            const q = (searchTerm || '').trim().toLowerCase();
 
-                  <div>
-                    <h3 className="font-semibold">{item.name}</h3>
-                    <p className="text-sm text-gray-600 mb-1">{item.category?.name || 'No Category'}</p>
-                    <p className="text-lg font-bold text-orange-600">₨{item.price}</p>
-                  </div>
-                </div>
+            const byFeatured = showOnlyFeatured
+              ? menuItems.filter((m: any) => !!m.featured)
+              : menuItems;
 
-                <div className="flex flex-col items-end space-y-2">
-                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {item.is_available ? 'Available' : 'Out of Stock'}
-                  </span>
+            const filtered = q === ''
+              ? byFeatured
+              : byFeatured.filter((m: any) => {
+                  const name = (m.name || '').toString().toLowerCase();
+                  const category = (m.category?.name || '').toString().toLowerCase();
 
-                  {/* Featured toggle (styled switch) */}
-                  <div className="flex items-center space-x-2">
-                    <span className={`text-xs ${item.featured ? 'text-orange-700 font-semibold' : 'text-gray-600'}`}>Featured</span>
+                  if (searchScope === 'name') return name.includes(q);
+                  if (searchScope === 'category') return category.includes(q);
+                  // 'all'
+                  return name.includes(q) || category.includes(q);
+                });
 
-                    <button
-                      title={item.featured ? 'Unfeature item' : 'Feature item'}
-                      onClick={async () => {
-                        // optimistic update
-                        const prevItems = menuItems.slice();
-                        setMenuItems(prevItems.map((m: any) => (m.id === item.id ? { ...m, featured: !m.featured } : m)));
-
-                        const newVal = !item.featured;
-                        try {
-                          // update item in menu_items
-                          const { error: updErr } = await supabase
-                            .from('menu_items')
-                            .update({ featured: newVal })
-                            .eq('id', item.id);
-                          if (updErr) throw updErr;
-
-                          // attempt to insert audit row (best-effort; won't block UI)
-                          try {
-                            const actor = (typeof window !== 'undefined' && localStorage.getItem('userEmail')) || null;
-                            const { error: auditErr } = await supabase
-                              .from('menu_item_featured_audit')
-                              .insert([{
-                                menu_item_id: item.id,
-                                changed_by: actor,
-                                previous: item.featured ?? false,
-                                current: newVal,
-                                reason: 'admin_toggle'
-                              }]);
-
-                            if (auditErr) {
-                              console.warn('Audit insert failed', auditErr);
-                              // don't throw — audit is non-blocking
-                            }
-                          } catch (ae) {
-                            console.warn('Audit exception', ae);
-                          }
-                        } catch (err) {
-                          console.error('Failed to update featured flag:', err);
-                          // revert UI
-                          setMenuItems(prevItems);
-                          alert('Unable to update featured status. Please try again.');
-                        }
-                      }}
-                      className={`relative inline-flex items-center h-6 rounded-full w-10 transition-colors focus:outline-none ${item.featured ? 'bg-orange-600' : 'bg-gray-200'}`}
-                    >
-                      <span
-                        className={`transform transition-transform w-4 h-4 bg-white rounded-full ${item.featured ? 'translate-x-4' : 'translate-x-1'}`}
+            return filtered.map((item: any) => (
+              <div key={item.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                      <img
+                        src={item.image_url || item.image || '/images/placeholder-food.png'}
+                        alt={item.name}
+                        className="max-w-full max-h-full object-contain object-center"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
                       />
-                    </button>
+                    </div>
+
+                    <div>
+                      <h3 className="font-semibold">{item.name}</h3>
+                      <p className="text-sm text-gray-600 mb-1">{item.category?.name || 'No Category'}</p>
+                      <p className="text-lg font-bold text-orange-600">₨{item.price}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end space-y-2">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {item.is_available ? 'Available' : 'Out of Stock'}
+                    </span>
+
+                    {/* Featured toggle (styled switch) */}
+                    <div className="flex items-center space-x-2">
+                      <span className={`text-xs ${item.featured ? 'text-orange-700 font-semibold' : 'text-gray-600'}`}>Featured</span>
+
+                      <button
+                        title={item.featured ? 'Unfeature item' : 'Feature item'}
+                        onClick={async () => {
+                          // optimistic update
+                          const prevItems = menuItems.slice();
+                          setMenuItems(prevItems.map((m: any) => (m.id === item.id ? { ...m, featured: !m.featured } : m)));
+
+                          const newVal = !item.featured;
+                          try {
+                            // update item in menu_items
+                            const { error: updErr } = await supabase
+                              .from('menu_items')
+                              .update({ featured: newVal })
+                              .eq('id', item.id);
+                            if (updErr) throw updErr;
+
+                            // attempt to insert audit row (best-effort; won't block UI)
+                            try {
+                              const actor = (typeof window !== 'undefined' && localStorage.getItem('userEmail')) || null;
+                              const { error: auditErr } = await supabase
+                                .from('menu_item_featured_audit')
+                                .insert([{
+                                  menu_item_id: item.id,
+                                  changed_by: actor,
+                                  previous: item.featured ?? false,
+                                  current: newVal,
+                                  reason: 'admin_toggle'
+                                }]);
+
+                              if (auditErr) {
+                                console.warn('Audit insert failed', auditErr);
+                                // don't throw — audit is non-blocking
+                              }
+                            } catch (ae) {
+                              console.warn('Audit exception', ae);
+                            }
+                          } catch (err) {
+                            console.error('Failed to update featured flag:', err);
+                            // revert UI
+                            setMenuItems(prevItems);
+                            alert('Unable to update featured status. Please try again.');
+                          }
+                        }}
+                        className={`relative inline-flex items-center h-6 rounded-full w-10 transition-colors focus:outline-none ${item.featured ? 'bg-orange-600' : 'bg-gray-200'}`}
+                      >
+                        <span
+                          className={`transform transition-transform w-4 h-4 bg-white rounded-full ${item.featured ? 'translate-x-4' : 'translate-x-1'}`}
+                        />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.description}</p>
+                <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.description}</p>
 
-              <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                <span>{item.preparation_time || 15} min prep</span>
-                {item.is_vegetarian && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">Vegetarian</span>}
-              </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                  <span>{item.preparation_time || 15} min prep</span>
+                  {item.is_vegetarian && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">Vegetarian</span>}
+                </div>
 
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => {
-                    setSelectedItem(item);
-                    setShowEditItemModal(true);
-                  }}
-                  className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                >
-                  <i className="ri-edit-line"></i>
-                </button>
-                <button
-                  onClick={() => handleDeleteMenuItem(item.id)}
-                  className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-                >
-                  <i className="ri-delete-bin-line"></i>
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      setSelectedItem(item);
+                      setShowEditItemModal(true);
+                    }}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-edit-line"></i>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMenuItem(item.id)}
+                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                  >
+                    <i className="ri-delete-bin-line"></i>
+                  </button>
+                </div>
               </div>
-            </div>
-          ))
+            ));
+          })()
         )}
       </div>
     </div>
   </div>
 )}
-
 
         {/* Categories Tab */}
         {/* Categories Tab */}
@@ -3015,15 +3085,52 @@ const handleAdminSave = async (payload: any) => {
   <div className="space-y-6">
     <div className="bg-white rounded-2xl shadow-lg p-6">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Menu Categories</h2>
-        <button
-          onClick={() => setShowAddCategoryModal(true)}
-          className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-        >
-          <i className="ri-add-line mr-2"></i>
-          Add Category
-        </button>
+              <div>
+          <h2 className="text-xl font-semibold">Menu Categories</h2>
+          <p className="text-sm text-gray-500">Manage categories — search, view, edit or remove.</p>
+        </div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+
+
+        <div className="flex items-center space-x-3">
+          {/* Search input + scope */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+            <input
+              type="search"
+              value={catSearchTerm}
+              onChange={(e) => setCatSearchTerm(e.target.value)}
+              placeholder="Search categories..."
+              className="bg-transparent px-2 py-2 text-sm outline-none w-56"
+            />
+            <select
+              value={catSearchScope}
+              onChange={(e) => setCatSearchScope(e.target.value as 'all' | 'name' | 'description' | 'items')}
+              className="text-sm bg-transparent border-l pl-2 ml-2 outline-none"
+              title="Search scope"
+            >
+              <option value="all">All</option>
+              <option value="name">Name</option>
+              <option value="description">Description</option>
+              <option value="items">Items</option>
+            </select>
+
+            <button
+              title="Clear search"
+              onClick={() => { setCatSearchTerm(''); setCatSearchScope('all'); }}
+              className="ml-2 px-2 py-1 rounded text-sm text-gray-600 hover:bg-gray-100"
+            >
+              ✕
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowAddCategoryModal(true)}
+            className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+          >
+            <i className="ri-add-line mr-2"></i>
+            Add Category
+          </button>
+        </div>
       </div>
 
       {/* Category List */}
@@ -3042,119 +3149,113 @@ const handleAdminSave = async (payload: any) => {
             </button>
           </div>
         ) : (
-          categories.map((category) => {
-            // compute icon source (URL or Supabase publicUrl)
-            let iconSrc: string | null = null;
-            if (category.icon) {
-              if (
-                category.icon.startsWith("http://") ||
-                category.icon.startsWith("https://") ||
-                category.icon.startsWith("data:")
-              ) {
-                iconSrc = category.icon;
-              } else {
-                const { data } = supabase
-                  .storage
-                  .from("menu-images")
-                  .getPublicUrl(category.icon);
-                iconSrc = data?.publicUrl ?? null;
-              }
-            }
+          (() => {
+            const q = (catSearchTerm || '').trim().toLowerCase();
 
-            return (
-              <div
-                key={category.id}
-                className="border border-gray-200 rounded-lg p-4"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
-                      {iconSrc ? (
-                        <img
-                          src={iconSrc}
-                          alt={category.name}
-                          className="w-8 h-8 object-cover rounded-full"
-                          onError={(e) =>
-                            ((e.currentTarget as HTMLImageElement).style.display =
-                              "none")
-                          }
-                        />
-                      ) : (
-                        <i className="ri-restaurant-line text-orange-600"></i>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">{category.name}</h3>
-                      <p className="text-sm text-gray-600">
-                        {
-                          menuItems.filter(
-                            (item) => item.category_id === category.id
-                          ).length
-                        }{" "}
-                        items
-                      </p>
+            // compute items count per category quickly
+            const itemCountFor = (catId: any) =>
+              menuItems.filter((item: any) => item.category_id === catId).length;
+
+            const filtered = q === ''
+              ? categories
+              : categories.filter((category: any) => {
+                  const name = (category.name || '').toString().toLowerCase();
+                  const desc = (category.description || '').toString().toLowerCase();
+                  const count = itemCountFor(category.id);
+                  const countStr = String(count);
+
+                  if (catSearchScope === 'name') return name.includes(q);
+                  if (catSearchScope === 'description') return desc.includes(q);
+                  if (catSearchScope === 'items') return countStr.includes(q);
+                  // 'all' -> name OR description OR items count
+                  return name.includes(q) || desc.includes(q) || countStr.includes(q);
+                });
+
+            return filtered.map((category: any) => {
+              // compute icon source (URL or Supabase publicUrl)
+              let iconSrc: string | null = null;
+              if (category.icon) {
+                if (
+                  category.icon.startsWith("http://") ||
+                  category.icon.startsWith("https://") ||
+                  category.icon.startsWith("data:")
+                ) {
+                  iconSrc = category.icon;
+                } else {
+                  const { data } = supabase
+                    .storage
+                    .from("menu-images")
+                    .getPublicUrl(category.icon);
+                  iconSrc = data?.publicUrl ?? null;
+                }
+              }
+
+              const itemCount = itemCountFor(category.id);
+
+              return (
+                <div
+                  key={category.id}
+                  className="border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                        {iconSrc ? (
+                          <img
+                            src={iconSrc}
+                            alt={category.name}
+                            className="w-8 h-8 object-cover rounded-full"
+                            onError={(e) =>
+                              ((e.currentTarget as HTMLImageElement).style.display =
+                                "none")
+                            }
+                          />
+                        ) : (
+                          <i className="ri-restaurant-line text-orange-600"></i>
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{category.name}</h3>
+                        <p className="text-sm text-gray-600">{itemCount} items</p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                  {category.description}
-                </p>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                    {category.description}
+                  </p>
 
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => handleViewCategory(category)}
-                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    <i className="ri-eye-line"></i>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedCategory(category);
-                      setShowEditCategoryModal(true);
-                    }}
-                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    <i className="ri-edit-line"></i>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteCategory(category.id)}
-                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-                  >
-                    <i className="ri-delete-bin-line"></i>
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleViewCategory(category)}
+                      className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    >
+                      <i className="ri-eye-line"></i>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedCategory(category);
+                        setShowEditCategoryModal(true);
+                      }}
+                      className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    >
+                      <i className="ri-edit-line"></i>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCategory(category.id)}
+                      className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                    >
+                      <i className="ri-delete-bin-line"></i>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            });
+          })()
         )}
-
       </div>
-
-
-
-
     </div>
-
-
-
-
-
-
-
-
-    
   </div>
-
-
-
-
-
-
-
-
-
-
 )}
 
 
