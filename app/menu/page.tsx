@@ -386,7 +386,7 @@ const filteredItems = menuItems.filter(item => {
 <div className="aspect-video relative bg-gray-100 flex items-center justify-center">
   <img
     src={item.image_url || 'https://via.placeholder.com/400x300?text=Menu+Item'}
-    alt={item.name}
+    alt={item.image_url}
     className="max-w-full max-h-full object-contain object-center"
   />
   {!item.is_available && (
