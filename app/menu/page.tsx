@@ -380,23 +380,35 @@ const filteredItems = menuItems.filter(item => {
                 const ingredientsList = getIngredientsList(item.ingredients);
                 return (
                   <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
-                    <div className="aspect-video relative">
-                      <img
-                        src={item.image_url || 'https://via.placeholder.com/400x300?text=Menu+Item'}
-                        alt={item.name}
-                        className="w-full h-full object-cover object-top"
-                      />
-                      {!item.is_available && (
-                        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                          <span className="text-white font-semibold text-lg">Out of Stock</span>
-                        </div>
-                      )}
-                      {item.is_vegetarian && (
-                        <div className="absolute top-2 left-2 w-6 h-6 bg-green-600 rounded-full flex items-center justify-center">
-                          <div className="w-3 h-3 bg-white rounded-full"></div>
-                        </div>
-                      )}
-                    </div>
+                   
+                   
+                   
+<div className="aspect-video relative bg-gray-100 flex items-center justify-center">
+  <img
+    src={item.image_url || 'https://via.placeholder.com/400x300?text=Menu+Item'}
+    alt={item.name}
+    className="max-w-full max-h-full object-contain object-center"
+  />
+  {!item.is_available && (
+    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <span className="text-white font-semibold text-lg">Out of Stock</span>
+    </div>
+  )}
+  {item.is_vegetarian && (
+    <div className="absolute top-2 left-2 w-6 h-6 bg-green-600 rounded-full flex items-center justify-center">
+      <div className="w-3 h-3 bg-white rounded-full"></div>
+    </div>
+  )}
+</div>
+
+
+
+
+
+
+
+
+
                     <div className="p-6">
                       <div className="flex justify-between items-start mb-2">
                         <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
