@@ -35,6 +35,8 @@ export default function DashboardPage() {
 
   const [error, setError] = useState<string | null>(null);
 
+// default true to keep original quality unless user chooses compression
+const [preserveQuality, setPreserveQuality] = useState<boolean>(true);
 
 
   const lastOrderCountRef = useRef<number | null>(null);
@@ -324,37 +326,52 @@ const replyToQuestion = async (id: number, answerText: string) => {
 
 
 
-  const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
-    console.log('[handleFileInputChange] called');
-    const file = e.target.files?.[0] ?? null;
-    if (!file) {
-      setPickedFile(null);
-      setPreviewUrl(null);
-      return;
-    }
-    setPickedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setUploadError(null);
-    setUploadedImageUrl(null);
+const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+  console.log('[handleFileInputChange] called');
+  const file = e.target.files?.[0] ?? null;
+  if (!file) {
+    setPickedFile(null);
+    setPreviewUrl(null);
+    return;
+  }
+  setPickedFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setUploadError(null);
+  setUploadedImageUrl(null);
 
-    try {
-      setUploading(true);
-      const compressed = await compressImageFile(file, 0.45, 1400).catch(() => file as any);
-      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+  try {
+    setUploading(true);
+
+    // If preserveQuality, upload raw file (fast + no quality loss)
+    if (preserveQuality) {
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, file, 'menu-item');
       if (!res.success) {
         console.error('[auto upload] failed', res.error);
         setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
         return;
       }
       setUploadedImageUrl(res.publicUrl || null);
-      console.log('[auto upload] done', res);
-    } catch (err) {
-      console.error('[auto upload] exception', err);
-      setUploadError((err as any)?.message ?? 'Upload exception');
-    } finally {
-      setUploading(false);
+      console.log('[auto upload - raw file] done', res);
+      return;
     }
-  };
+
+    // Otherwise compress (but our compressImageFile now uses higher defaults)
+    const compressed = await compressImageFile(file, 0.9, 2000, { preserveQuality: false }).catch(() => file as any);
+    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+    if (!res.success) {
+      console.error('[auto upload] failed', res.error);
+      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+      return;
+    }
+    setUploadedImageUrl(res.publicUrl || null);
+    console.log('[auto upload] done', res);
+  } catch (err) {
+    console.error('[auto upload] exception', err);
+    setUploadError((err as any)?.message ?? 'Upload exception');
+  } finally {
+    setUploading(false);
+  }
+};
 
 
 
@@ -385,11 +402,34 @@ const handleFileSelectFromFile = (f?: File | null) => {
 };
 
 
-// 1) compressImageFile - single, robust implementation
-async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): Promise<Blob> {
+// new compressImageFile: can optionally skip compression or keep lossless PNG
+async function compressImageFile(
+  file: File,
+  quality = 0.9,        // default higher quality if you do compress
+  maxWidth = 2000,      // larger max width to avoid downsizing unless needed
+  options: { preserveQuality?: boolean } = {}
+): Promise<Blob | File> {
   if (typeof window === 'undefined') return file;
   if (!file || !file.type?.startsWith?.('image/')) return file;
 
+  const { preserveQuality = true } = options;
+
+  // helper: decide whether to skip compression for this file
+  const shouldSkipCompression = (f: File) => {
+    // skip compression for PNG to preserve transparency or when preserveQuality requested
+    if (preserveQuality) return true;
+    const isPng = f.type === 'image/png';
+    // skip if file size is already small (< 200 KB) - you can adjust threshold
+    const smallFile = f.size <= 200 * 1024;
+    return isPng || smallFile;
+  };
+
+  if (shouldSkipCompression(file)) {
+    // return original File to preserve quality
+    return file;
+  }
+
+  // otherwise do canvas resize + encode (JPEG)
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const image = new Image();
@@ -398,6 +438,7 @@ async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): P
     image.src = url;
   });
 
+  // compute new size while preserving aspect
   const ratio = Math.min(1, maxWidth / img.width);
   const width = Math.round(img.width * ratio);
   const height = Math.round(img.height * ratio);
@@ -407,16 +448,21 @@ async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): P
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas not supported');
-
   ctx.drawImage(img, 0, 0, width, height);
 
+  // For best quality: use original file type when possible (but keep PNG lossless)
+  const isOrigPNG = file.type === 'image/png';
+  const mime = isOrigPNG ? 'image/png' : 'image/jpeg';
+
   return await new Promise<Blob>((resolve, reject) => {
+    // For PNG the quality argument is ignored (PNG is lossless)
     canvas.toBlob((blob) => {
       if (!blob) return reject(new Error('Canvas toBlob returned null'));
       resolve(blob);
-    }, 'image/jpeg', quality);
+    }, mime, Math.max(0.8, quality)); // keep high quality
   });
 }
+
 
 
 
@@ -442,47 +488,43 @@ const handleFileSelect = (f?: File | null) => {
 
 
 
-  async function uploadCompressedImageToSupabaseSafe(
-    supClient: ReturnType<typeof createClient>,
-    bucket: string,
-    blob: Blob,
-    prefix = 'img'
-  ): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
-    console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blob.size });
-    if (!supClient) return { success: false, error: 'Supabase client missing' };
-    if (!bucket) return { success: false, error: 'Bucket name missing' };
+async function uploadCompressedImageToSupabaseSafe(
+  supClient: ReturnType<typeof createClient>,
+  bucket: string,
+  blobOrFile: Blob | File,
+  prefix = 'img'
+): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
+  console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blobOrFile.size });
+  if (!supClient) return { success: false, error: 'Supabase client missing' };
+  if (!bucket) return { success: false, error: 'Bucket name missing' };
 
-    try {
-      const filename = `${prefix}-${makeFilename('upload')}`;
-      const uploadBlob = blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' });
+  try {
+    const filename = `${prefix}-${makeFilename('upload')}`;
+    // ensure uploadBlob has a type: preserve original type when possible
+    const uploadBlob = blobOrFile instanceof Blob ? blobOrFile : new Blob([blobOrFile], { type: blobOrFile.type || 'image/jpeg' });
+    const contentType = (uploadBlob as any).type || 'image/jpeg';
 
-      const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
-        contentType: 'image/jpeg',
-        cacheControl: '3600',
-        upsert: false,
-      });
+    const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
+      contentType,
+      cacheControl: '3600',
+      upsert: false,
+    });
 
-      if (error) {
-        console.log('[Supabase upload] error', error);
-        return { success: false, error };
-      }
-      console.log('[Supabase upload] success', data);
-
-      const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
-      if (urlResult?.error) {
-        console.warn('[Supabase getPublicUrl] error', urlResult.error);
-        return { success: true, publicUrl: null, path: data.path };
-      }
-
-      const publicUrl = urlResult?.data?.publicUrl ?? null;
-      console.log('[Supabase publicUrl]', publicUrl);
-
-      return { success: true, publicUrl, path: data.path };
-    } catch (err) {
-      console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
-      return { success: false, error: err };
+    if (error) {
+      console.log('[Supabase upload] error', error);
+      return { success: false, error };
     }
+    console.log('[Supabase upload] success', data);
+
+    const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
+    const publicUrl = urlResult?.data?.publicUrl ?? null;
+    return { success: true, publicUrl, path: data.path };
+  } catch (err) {
+    console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
+    return { success: false, error: err };
   }
+}
+
 
 
 
@@ -518,26 +560,39 @@ const handleFileSelect = (f?: File | null) => {
 
 
 
-  const handleUpload = async () => {
-    if (!pickedFile) return setUploadError('Select a file first');
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const compressed = await compressImageFile(pickedFile, 0.35, 1200).catch(() => pickedFile as any);
-      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+const handleUpload = async () => {
+  if (!pickedFile) return setUploadError('Select a file first');
+  setUploading(true);
+  setUploadError(null);
+  try {
+    if (preserveQuality) {
+      // upload original file bytes to preserve everything
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, pickedFile, 'menu-item');
       if (!res.success) {
         console.error('[handleUpload] upload failed', res.error);
         setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
         return;
       }
       setUploadedImageUrl(res.publicUrl || null);
-    } catch (err) {
-      console.error('[handleUpload] exception', err);
-      setUploadError((err as any)?.message ?? 'Upload exception');
-    } finally {
-      setUploading(false);
+      return;
     }
-  };
+
+    // compress with high quality defaults if user opted to compress
+    const compressed = await compressImageFile(pickedFile, 0.9, 2000, { preserveQuality: false }).catch(() => pickedFile as any);
+    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+    if (!res.success) {
+      console.error('[handleUpload] upload failed', res.error);
+      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+      return;
+    }
+    setUploadedImageUrl(res.publicUrl || null);
+  } catch (err) {
+    console.error('[handleUpload] exception', err);
+    setUploadError((err as any)?.message ?? 'Upload exception');
+  } finally {
+    setUploading(false);
+  }
+};
 
 
 
@@ -3075,6 +3130,7 @@ const handleAdminSave = async (payload: any) => {
       <span className="text-sm">Choose file</span>
     </label>
 
+
     {/* hidden file input — unique id so it doesn't clash with other pickers */}
     <input
       id="add-category-icon-file"
@@ -3091,6 +3147,14 @@ const handleAdminSave = async (payload: any) => {
   {/* Upload controls + preview (reuses your existing upload helpers/state) */}
   <div className="mt-4">
     <div className="flex items-center space-x-3">
+
+
+
+
+
+
+
+
       <button
         type="button"
         onClick={handleUpload}
@@ -3426,6 +3490,14 @@ const handleAdminSave = async (payload: any) => {
     <img src={previewUrl} alt="preview" className="w-40 h-28 object-cover rounded mb-2" />
   )}
 
+<label className="inline-flex items-center space-x-2">
+  <input type="checkbox" checked={preserveQuality} onChange={(e) => setPreserveQuality(e.target.checked)} />
+  <span className="text-sm">Preserve original quality / preserve PNG transparency</span>
+</label>
+
+
+
+
   <div className="flex items-center space-x-2">
     <button
       type="button"
@@ -3639,6 +3711,10 @@ const handleAdminSave = async (payload: any) => {
               className="hidden"
             />
           </div>
+<label className="inline-flex items-center space-x-2">
+  <input type="checkbox" checked={preserveQuality} onChange={(e) => setPreserveQuality(e.target.checked)} />
+  <span className="text-sm">Preserve original quality / preserve PNG transparency</span>
+</label>
 
           {/* Upload controls & preview area */}
           <div className="mt-4">
