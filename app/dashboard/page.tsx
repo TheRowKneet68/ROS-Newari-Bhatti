@@ -2559,7 +2559,12 @@ const handleAdminSave = async (payload: any) => {
                           {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
                         </span>
 
-
+  {/* NEW ORDER Badge */}
+  {order.status?.toLowerCase() === 'placed' && (
+    <span className="ml-2 px-3 py-1 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+      🚨 New Order
+    </span>
+  )}
 
                         </div>
                         <p className="text-sm text-gray-600">
@@ -2754,12 +2759,16 @@ const handleAdminSave = async (payload: any) => {
                 filteredOrders.map((order) => (
                   <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <h3 className="font-semibold">Order #{order.id}</h3>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
-                          {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
-                        </span>
-
+                      
+                      
+                      
+                      
+                      
+<div className="flex items-center space-x-3 mb-2">
+  <h3 className="font-semibold">Order #{order.id}</h3>
+  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
+    {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
+  </span>
 
 
 
@@ -2772,7 +2781,12 @@ const handleAdminSave = async (payload: any) => {
   {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
 </span>
 
-
+  {/* NEW ORDER Badge */}
+  {order.status?.toLowerCase() === 'placed' && (
+    <span className="ml-2 px-3 py-1 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+      🚨 New Order
+    </span>
+  )}
 
 
                       </div>
@@ -2817,6 +2831,12 @@ const handleAdminSave = async (payload: any) => {
                 ))
               )}
             </div>
+
+
+
+
+
+
           </div>
         )}
 
