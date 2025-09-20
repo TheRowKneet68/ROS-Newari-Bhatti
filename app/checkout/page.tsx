@@ -4,7 +4,7 @@ import Header from '../../components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient'; // keep your existing client
+import { supabase } from '../../lib/supabaseClient'; // adjust path if your client is elsewhere
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -13,6 +13,8 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [loading, setLoading] = useState(false);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+
+  // Customer + address state — these will be auto-filled if user profile exists
   const [customerInfo, setCustomerInfo] = useState({
     firstName: '',
     lastName: '',
@@ -25,15 +27,21 @@ export default function CheckoutPage() {
     state: '',
     zipCode: ''
   });
+
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   useEffect(() => {
-    loadMenuAndCart();
-    fetchUserProfile();
+    // Load menu, cart and then user profile (profile needs to populate fields)
+    (async () => {
+      await loadMenuAndCart();
+      await fetchUserProfileAndFill();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadMenuAndCart = async () => {
     try {
+      // optional: your existing function fetch for menu; keep as-is or adapt
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
         method: 'POST',
         headers: {
@@ -43,13 +51,13 @@ export default function CheckoutPage() {
         body: JSON.stringify({ action: 'getMenuData' })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (data.success && data.menuItems) {
         setMenuItems(data.menuItems);
 
         const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
         const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => {
-          const item = data.menuItems.find((i: any) => i.id === parseInt(itemId));
+          const item = data.menuItems.find((i: any) => String(i.id) === String(itemId));
           if (item) {
             return {
               ...item,
@@ -63,30 +71,46 @@ export default function CheckoutPage() {
         setCartItems(cartArray as any[]);
       } else {
         console.error('Failed to load menu items from function');
+        // fallback: rebuild cart from saved ids
+        const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
+        const cartArray = Object.entries(savedCart).map(([itemId, quantity]) => ({
+          id: itemId,
+          name: `Item ${itemId}`,
+          price: 0,
+          image_url: '',
+          quantity
+        }));
+        setCartItems(cartArray as any[]);
       }
 
-      // Load user info if logged in (local fallback)
-      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-      if (isLoggedIn) {
-        const userInfo = JSON.parse(localStorage.getItem('userData') || '{}');
-        if (userInfo.firstName || userInfo.email) {
-          setCustomerInfo({
-            firstName: userInfo.firstName || '',
-            lastName: userInfo.lastName || '',
-            email: userInfo.email || '',
-            phone: userInfo.phone || ''
-          });
-        }
+      // If user info exists in localStorage, keep it as fallback (we'll override with DB values if available)
+      const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+      if (storedUser && (storedUser.firstName || storedUser.email)) {
+        setCustomerInfo({
+          firstName: storedUser.firstName || '',
+          lastName: storedUser.lastName || '',
+          email: storedUser.email || '',
+          phone: storedUser.phone || ''
+        });
+      }
+      const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+      if (storedAddress && (storedAddress.street || storedAddress.city)) {
+        setAddress({
+          street: storedAddress.street || '',
+          city: storedAddress.city || '',
+          state: storedAddress.state || '',
+          zipCode: storedAddress.zipCode || ''
+        });
       }
     } catch (error) {
       console.error('Error loading menu and cart:', error);
     }
   };
 
+  // subtotal, deliveryFee, tax, total
   const subtotal = cartItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0);
-  const deliveryFee = orderType === 'delivery' ? 50 : 0;
-  const tax = Math.round((subtotal + deliveryFee) * 0.13);
-  const total = subtotal + deliveryFee + tax;
+
+  const total = subtotal;
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,9 +119,8 @@ export default function CheckoutPage() {
     try {
       // Try to get supabase user (if logged in)
       const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user ?? null;
+      const user = (userData as any)?.user ?? null;
       const currentUserId = localStorage.getItem('userId') || (user ? user.id : null);
-      const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true' || !!user;
 
       // Prepare items payload: map to simple objects to avoid circular refs
       const itemsPayload = cartItems.map(i => ({
@@ -119,8 +142,7 @@ export default function CheckoutPage() {
         order_type: orderType,
         address: orderType === 'delivery' ? address : null,
         subtotal,
-        delivery_fee: deliveryFee,
-        tax,
+
         total,
         payment_method: paymentMethod === 'cod' ? 'Cash on Delivery' : 'Card Payment',
         special_instructions: specialInstructions,
@@ -134,9 +156,8 @@ export default function CheckoutPage() {
       let orderId: any = null;
       let dbSaved = false;
 
-      // Attempt Supabase insert (client-side). This requires RLS or table settings to allow insert.
+      // Attempt Supabase insert (client-side).
       try {
-        // NOTE: change column names below if your orders table uses different names
         const { data: inserted, error: insertError } = await supabase
           .from('orders')
           .insert([{
@@ -146,8 +167,7 @@ export default function CheckoutPage() {
             order_type: orderData.order_type,
             address: orderData.address,
             subtotal: orderData.subtotal,
-            delivery_fee: orderData.delivery_fee,
-            tax: orderData.tax,
+
             total: orderData.total,
             payment_method: orderData.payment_method,
             special_instructions: orderData.special_instructions,
@@ -168,13 +188,11 @@ export default function CheckoutPage() {
         console.error('Error inserting order to Supabase:', dbErr);
       }
 
-      // Fallback if DB save failed
       if (!dbSaved) {
         orderId = 'NB-' + Date.now().toString().slice(-8) + Math.random().toString(36).substr(2, 4).toUpperCase();
         console.warn('DB save failed — using local fallback id:', orderId);
       }
 
-      // Build final order object for localStorage
       const order = {
         id: orderId,
         ...orderData,
@@ -182,7 +200,6 @@ export default function CheckoutPage() {
         orderDate: new Date().toISOString()
       };
 
-      // Save to userOrders and allOrders localStorage for immediate access
       const existingOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
       existingOrders.unshift(order);
       localStorage.setItem('userOrders', JSON.stringify(existingOrders));
@@ -191,7 +208,6 @@ export default function CheckoutPage() {
       allOrders.unshift(order);
       localStorage.setItem('allOrders', JSON.stringify(allOrders));
 
-      // Clear cart localStorage and state
       localStorage.removeItem('cartItems');
       setCartItems([]);
 
@@ -206,47 +222,179 @@ export default function CheckoutPage() {
     }
   };
 
-  const fetchUserProfile = async () => {
-    try {
-      const { data, error: authError } = await supabase.auth.getUser();
+  // -----------------------------
+  // NEW: fetch user profile and fill customer + address inputs (Supabase-backed)
+  // -----------------------------
+  const parseAddress = (addr: any) => {
+    if (!addr) return { street: '', city: '', state: '', zipCode: '' };
+    if (typeof addr === 'string') {
+      try {
+        const parsed = JSON.parse(addr);
+        return {
+          street: parsed.street ?? '',
+          city: parsed.city ?? '',
+          state: parsed.state ?? '',
+          zipCode: parsed.zip ?? parsed.zipCode ?? ''
+        };
+      } catch {
+        return { street: '', city: '', state: '', zipCode: '' };
+      }
+    }
+    if (typeof addr === 'object') {
+      return {
+        street: addr.street ?? '',
+        city: addr.city ?? '',
+        state: addr.state ?? '',
+        zipCode: addr.zip ?? addr.zipCode ?? ''
+      };
+    }
+    return { street: '', city: '', state: '', zipCode: '' };
+  };
 
-      if (authError || !data?.user) {
-        console.log('User not logged in', authError?.message);
+  const fetchUserProfileAndFill = async () => {
+    try {
+      // 1) try to get supabase auth user
+      const { data: authData } = await supabase.auth.getUser();
+      const user = (authData as any)?.user ?? null;
+
+      // If not logged in, try reading from localStorage (already used elsewhere)
+      if (!user) {
+        const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+        const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+
+        if (storedUser && (storedUser.firstName || storedUser.email)) {
+          setCustomerInfo({
+            firstName: storedUser.firstName || storedUser.first_name || '',
+            lastName: storedUser.lastName || storedUser.last_name || '',
+            email: storedUser.email || storedUser.email_address || '',
+            phone: storedUser.phone || storedUser.phone_number || ''
+          });
+        }
+
+        if (storedAddress && (storedAddress.street || storedAddress.city)) {
+          setAddress({
+            street: storedAddress.street || '',
+            city: storedAddress.city || '',
+            state: storedAddress.state || '',
+            zipCode: storedAddress.zipCode || storedAddress.zip || ''
+          });
+        }
         return;
       }
 
-      const user = data.user;
+      // 2) attempt to fetch profile row from your users (or profiles) table
+      // adjust selected fields to match your schema
+      // try users by id (if you store user.id in users table) or by email
+      const email = (user as any).email ?? null;
+      const userId = (user as any).id ?? null;
 
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      let profile: any = null;
+      let profileErr: any = null;
 
-      if (profileError) {
-        console.log('Profile fetch error:', profileError.message);
-        return;
+      // Prefer querying by user id if your users table uses user_id as PK
+      if (userId) {
+        const { data: p1, error: e1 } = await supabase
+          .from('users')
+          .select(`
+            first_name,
+            last_name,
+            phone,
+            email,
+            address,
+            address_street,
+            address_city,
+            address_state,
+            address_zip_code
+          `)
+          .eq('id', userId)
+          .maybeSingle();
+        profile = p1;
+        profileErr = e1;
+      }
+
+      // If nothing returned, try by email
+      if (!profile && email) {
+        const { data: p2, error: e2 } = await supabase
+          .from('users')
+          .select(`
+            first_name,
+            last_name,
+            phone,
+            email,
+            address,
+            address_street,
+            address_city,
+            address_state,
+            address_zip_code
+          `)
+          .eq('email', email)
+          .maybeSingle();
+        profile = p2;
+        profileErr = e2;
+      }
+
+      if (profileErr) {
+        console.warn('Profile fetch error (may not exist):', profileErr);
+      }
+
+      // Compose values: priority -> DB profile fields -> auth user -> localStorage fallback
+      const storedUser = JSON.parse(localStorage.getItem('userData') || '{}');
+      const storedAddress = JSON.parse(localStorage.getItem('userAddress') || '{}');
+
+      const firstName = profile?.first_name ?? storedUser.firstName ?? (user as any).user_metadata?.full_name ?? '';
+      const lastName = profile?.last_name ?? storedUser.lastName ?? '';
+      const emailFromProfile = profile?.email ?? email ?? storedUser.email ?? '';
+      const phone = profile?.phone ?? storedUser.phone ?? '';
+
+      // Try to normalize address — users table might store address json or flattened columns
+      let street = '';
+      let city = '';
+      let stateVal = '';
+      let zip = '';
+
+      if (profile?.address) {
+        const parsedAddr = parseAddress(profile.address);
+        street = parsedAddr.street;
+        city = parsedAddr.city;
+        stateVal = parsedAddr.state;
+        zip = parsedAddr.zipCode;
+      } else {
+        // flattened columns fallback
+        street = profile?.address_street ?? storedAddress.street ?? '';
+        city = profile?.address_city ?? storedAddress.city ?? '';
+        stateVal = profile?.address_state ?? storedAddress.state ?? '';
+        zip = profile?.address_zip_code ?? profile?.address_zip ?? storedAddress.zipCode ?? '';
       }
 
       setCustomerInfo({
-        firstName: profile.first_name || '',
-        lastName: profile.last_name || '',
-        email: user.email || '',
-        phone: profile.phone || ''
+        firstName,
+        lastName,
+        email: emailFromProfile,
+        phone
       });
 
       setAddress({
-        street: profile.street || '',
-        city: profile.city || '',
-        state: profile.state || '',
-        zipCode: profile.zip_code || ''
+        street,
+        city,
+        state: stateVal,
+        zipCode: zip
       });
 
-    } catch (error) {
-      console.log('Error fetching user profile:', error);
+      // Persist to localStorage as offline fallback
+      try {
+        localStorage.setItem('userData', JSON.stringify({
+          firstName, lastName, email: emailFromProfile, phone
+        }));
+        localStorage.setItem('userAddress', JSON.stringify({ street, city, state: stateVal, zipCode: zip }));
+      } catch (e) {
+        // ignore localStorage failures
+      }
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
     }
   };
 
+  // If cart empty UI
   if (cartItems.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -265,6 +413,7 @@ export default function CheckoutPage() {
     );
   }
 
+  // main render
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
@@ -400,18 +549,6 @@ export default function CheckoutPage() {
               )}
 
               <div className="bg-white rounded-2xl shadow-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">Special Instructions</h2>
-                <textarea
-                  value={specialInstructions}
-                  onChange={(e) => setSpecialInstructions(e.target.value)}
-                  placeholder="Any special requests or dietary restrictions..."
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none"
-                  rows={3}
-                  maxLength={500}
-                />
-              </div>
-
-              <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
                 <div className="space-y-3">
                   <label className="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
@@ -447,7 +584,7 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* Order Summary */}
+            {/* Order Summary (right side) */}
             <div className="lg:sticky lg:top-8 h-fit">
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Order Summary</h2>
@@ -456,7 +593,7 @@ export default function CheckoutPage() {
                   {cartItems.map((item) => (
                     <div key={item.id} className="flex items-center space-x-3">
                       <img
-                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%20clean%20background&width=120&height=120&seq=checkout-item&orientation=squarish'}
+                        src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish&width=120&height=120'}
                         alt={item.name}
                         className="w-12 h-12 object-cover object-top rounded-lg"
                       />
@@ -474,22 +611,12 @@ export default function CheckoutPage() {
                     <span>Subtotal</span>
                     <span>₨{subtotal.toLocaleString()}</span>
                   </div>
-                  {deliveryFee > 0 && (
-                    <div className="flex justify-between">
-                      <span>Delivery Fee</span>
-                      <span>₨{deliveryFee.toLocaleString()}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span>VAT (13%)</span>
-                    <span>₨{tax.toLocaleString()}</span>
-                  </div>
+
                   <div className="border-t pt-2 flex justify-between font-bold text-lg">
                     <span>Total</span>
                     <span className="text-orange-600">₨{total.toLocaleString()}</span>
                   </div>
                 </div>
-
 
                 <div className="mt-6 p-4 bg-orange-50 rounded-lg">
                   <div className="flex items-center space-x-2">

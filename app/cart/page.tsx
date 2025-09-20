@@ -59,7 +59,7 @@ export default function CartPage() {
             return {
               ...item,
               quantity: quantity as number,
-              specialInstructions: ''
+              // specialInstructions: ''
             };
           }
           return null;
@@ -97,13 +97,13 @@ export default function CartPage() {
     }
   };
 
-  const updateInstructions = (id: number, instructions: string) => {
-    setCartItems(items => 
-      items.map(item => 
-        item.id === id ? { ...item, specialInstructions: instructions } : item
-      )
-    );
-  };
+  // const updateInstructions = (id: number, instructions: string) => {
+  //   setCartItems(items => 
+  //     items.map(item => 
+  //       item.id === id ? { ...item, specialInstructions: instructions } : item
+  //     )
+  //   );
+  // };
 
   const applyPromoCode = () => {
     const code = promoCode.toLowerCase().trim();
@@ -123,9 +123,9 @@ export default function CartPage() {
 
   const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const discountAmount = subtotal * discount;
-  const deliveryFee = subtotal > 500 ? 0 : 50;
-  const tax = Math.round((subtotal - discountAmount) * 0.13); // 13% VAT in Nepal
-  const total = subtotal - discountAmount + deliveryFee + tax;
+  // const deliveryFee = subtotal > 500 ? 0 : 50;
+  // const tax = Math.round((subtotal - discountAmount) * 0.13); // 13% VAT in Nepal
+  const total = subtotal - discountAmount;
 
   // while we confirm auth redirect, don't render the cart UI (avoids flash)
   if (checkingAuth) {
@@ -190,7 +190,7 @@ export default function CartPage() {
                     <h3 className="font-semibold text-gray-800 mb-1">{item.name}</h3>
                     <p className="text-orange-600 font-bold">₨{item.price.toLocaleString()}</p>
                     
-                    <div className="mt-3">
+                    {/* <div className="mt-3">
                       <textarea
                         placeholder="Special instructions (optional)"
                         value={item.specialInstructions}
@@ -199,7 +199,7 @@ export default function CartPage() {
                         rows={2}
                         maxLength={500}
                       />
-                    </div>
+                    </div> */}
                   </div>
                   
                   <div className="flex flex-col items-end space-y-3">
@@ -234,29 +234,7 @@ export default function CartPage() {
               ))}
             </div>
             
-            <div className="bg-white rounded-2xl shadow-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">Promo Code</h3>
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  placeholder="Enter promo code (NEWARI10, WELCOME15, POKHARA20)"
-                  value={promoCode}
-                  onChange={(e) => setPromoCode(e.target.value)}
-                  className="flex-1 p-3 border border-gray-300 rounded-lg"
-                />
-                <button
-                  onClick={applyPromoCode}
-                  className="bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  Apply
-                </button>
-              </div>
-              {discount > 0 && (
-                <p className="text-green-600 mt-2 text-sm">
-                  Promo code applied! {(discount * 100)}% discount
-                </p>
-              )}
-            </div>
+
           </div>
           
           <div className="lg:col-span-1">
@@ -276,15 +254,15 @@ export default function CartPage() {
                   </div>
                 )}
                 
-                <div className="flex justify-between">
+                {/* <div className="flex justify-between">
                   <span>Delivery Fee</span>
                   <span>{deliveryFee === 0 ? 'FREE' : `₨${deliveryFee}`}</span>
-                </div>
+                </div> */}
                 
-                <div className="flex justify-between">
+                {/* <div className="flex justify-between">
                   <span>VAT (13%)</span>
                   <span>₨{tax.toLocaleString()}</span>
-                </div>
+                </div> */}
                 
                 <div className="border-t pt-3 flex justify-between font-bold text-lg">
                   <span>Total</span>
@@ -292,11 +270,11 @@ export default function CartPage() {
                 </div>
               </div>
               
-              {subtotal < 500 && (
+              {/* {subtotal < 500 && (
                 <p className="text-sm text-gray-600 mt-3 p-3 bg-yellow-50 rounded-lg">
                   Add ₨{(500 - subtotal).toLocaleString()} more for free delivery!
                 </p>
-              )}
+              )} */}
               
               <Link 
                 href="/checkout" 

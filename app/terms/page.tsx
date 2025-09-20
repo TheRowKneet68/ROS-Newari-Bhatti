@@ -103,7 +103,7 @@ export default function TermsPage() {
               <div className="bg-orange-50 rounded-lg p-6">
                 <div className="space-y-3">
                   <p className="text-gray-700">
-                    <strong>Restaurant:</strong> Newari Bhatti and Kathmandu Momo Ghar
+                    <strong>Restaurant:</strong> Newari Bhatti and Kathmandu Momo House
                   </p>
                   <p className="text-gray-700">
                     <strong>Address:</strong> Nadipur, Pokhara 33700, Nepal (6XHR+G9X)

@@ -9,6 +9,10 @@ import OrderModal from './OrderModal';
 import { createClient } from '@supabase/supabase-js';
 import { useRef } from 'react';
 
+
+
+
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -24,6 +28,8 @@ if (typeof window !== 'undefined') {
 
 
 export default function DashboardPage() {
+  const [userQuestions, setUserQuestions] = useState<any[]>([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
   const BUCKETNAME = 'menu-images';
 
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
@@ -90,16 +96,14 @@ const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
 
 
-
-
-
-  const [restaurantInfo, setRestaurantInfo] = useState({
-    name: 'Newari Bhatti and Kathmandu Momo Ghar',
-    phone: '+977-9829117277',
-    email: 'info@newaribhatti.com',
-    address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
-    coordinates: '28.22886241546525, 83.99098268394296'
-  });
+const [restaurantInfo, setRestaurantInfo] = useState({
+  name: 'Newari Bhatti and Kathmandu Momo Ghar',
+  phone: '+977-9829117277',
+  email: 'info@newaribhatti.com',
+  address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
+  coordinates: '28.22886241546525, 83.99098268394296'
+});
+const [restaurantLoading, setRestaurantLoading] = useState(false);
 
 
 
@@ -122,6 +126,8 @@ const makeFilename = (originalName: string) => {
   const name = originalName.replace(/\.[^/.]+$/, '');
   return `${name}_${Date.now()}.${ext}`;
 };
+
+
 
 
 
@@ -170,40 +176,49 @@ async function uploadImageFile(file: File, userId?: string) {
 // proper React input change handler
 
 
-
-
-
-
-
-// 3) unified input change handler (auto-upload on selection)
-const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
-  const file = e.target.files?.[0] ?? null;
-  if (!file) {
-    setPickedFile(null);
-    setPreviewUrl(null);
-    return;
-  }
-  setPickedFile(file);
-  setPreviewUrl(URL.createObjectURL(file));
-  setUploadedImageUrl(null);
-  setUploadError(null);
-
+const loadUserQuestions = async () => {
+  setLoadingQuestions(true);
   try {
-    setUploading(true);
-    const compressed = await compressImageFile(file, 0.45, 1400).catch(() => file);
-    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
-    if (!res.success) {
-      console.error('[auto upload] failed', res.error);
-      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
-      return;
+    const { data, error } = await supabase
+      .from('user_questions')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading questions:', error);
+      setUserQuestions([]);
+    } else {
+      setUserQuestions(data ?? []);
     }
-    setUploadedImageUrl(res.publicUrl || null);
-    console.log('[auto upload] done', res);
-  } catch (err) {
-    console.error('[auto upload] exception', err);
-    setUploadError((err as any)?.message ?? 'Upload exception');
   } finally {
-    setUploading(false);
+    setLoadingQuestions(false);
+  }
+};
+
+useEffect(() => {
+  loadUserQuestions();
+}, []);
+
+
+
+
+
+
+const askQuestion = async (questionText: string) => {
+  try {
+    const { error } = await supabase
+      .from('user_questions')
+      .insert([{ question: questionText }]);
+
+    if (error) {
+      console.error('Error asking question:', error);
+      alert('Could not send your question.');
+    } else {
+      alert('Your question has been submitted!');
+      loadUserQuestions();
+    }
+  } catch (err) {
+    console.error('Unexpected error asking question:', err);
   }
 };
 
@@ -212,6 +227,72 @@ const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async 
 
 
 
+const replyToQuestion = async (id: number, answerText: string) => {
+  try {
+    const { error } = await supabase
+      .from('user_questions')
+      .update({
+        answer: answerText,
+        is_answered: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error replying to question:', error);
+      alert('Could not reply.');
+    } else {
+      loadUserQuestions();
+    }
+  } catch (err) {
+    console.error('Unexpected error replying:', err);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    console.log('[handleFileInputChange] called');
+    const file = e.target.files?.[0] ?? null;
+    if (!file) {
+      setPickedFile(null);
+      setPreviewUrl(null);
+      return;
+    }
+    setPickedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setUploadError(null);
+    setUploadedImageUrl(null);
+
+    try {
+      setUploading(true);
+      const compressed = await compressImageFile(file, 0.45, 1400).catch(() => file as any);
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+      if (!res.success) {
+        console.error('[auto upload] failed', res.error);
+        setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+        return;
+      }
+      setUploadedImageUrl(res.publicUrl || null);
+      console.log('[auto upload] done', res);
+    } catch (err) {
+      console.error('[auto upload] exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
+    } finally {
+      setUploading(false);
+    }
+  };
 
 
 
@@ -298,45 +379,48 @@ const handleFileSelect = (f?: File | null) => {
 
 
 
-// 2) uploadCompressedImageToSupabaseSafe - single uploader that returns a consistent object
-async function uploadCompressedImageToSupabaseSafe(
-  supClient: ReturnType<typeof createClient>,
-  bucket: string,
-  blob: Blob,
-  prefix = 'img'
-): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
-  if (!supClient) return { success: false, error: 'Supabase client missing' };
-  if (!bucket) return { success: false, error: 'Bucket name missing' };
 
-  try {
-    const filename = `${prefix}-${Date.now()}.jpg`;
-    const uploadBlob = blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' });
+  async function uploadCompressedImageToSupabaseSafe(
+    supClient: ReturnType<typeof createClient>,
+    bucket: string,
+    blob: Blob,
+    prefix = 'img'
+  ): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
+    console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blob.size });
+    if (!supClient) return { success: false, error: 'Supabase client missing' };
+    if (!bucket) return { success: false, error: 'Bucket name missing' };
 
-    const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
-      contentType: 'image/jpeg',
-      cacheControl: '3600',
-      upsert: false,
-    });
+    try {
+      const filename = `${prefix}-${makeFilename('upload')}`;
+      const uploadBlob = blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' });
 
-    if (error) {
-      console.log('[Supabase upload] error', error);
-      return { success: false, error };
+      const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
+        contentType: 'image/jpeg',
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+      if (error) {
+        console.log('[Supabase upload] error', error);
+        return { success: false, error };
+      }
+      console.log('[Supabase upload] success', data);
+
+      const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
+      if (urlResult?.error) {
+        console.warn('[Supabase getPublicUrl] error', urlResult.error);
+        return { success: true, publicUrl: null, path: data.path };
+      }
+
+      const publicUrl = urlResult?.data?.publicUrl ?? null;
+      console.log('[Supabase publicUrl]', publicUrl);
+
+      return { success: true, publicUrl, path: data.path };
+    } catch (err) {
+      console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
+      return { success: false, error: err };
     }
-
-    // If bucket is public, this returns data.publicUrl. If private, it may return null.
-    const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data?.path ?? filename);
-    if (urlResult?.error) {
-      // return success true because upload succeeded but public URL may be null for private bucket
-      return { success: true, publicUrl: null, path: data?.path ?? filename };
-    }
-
-    const publicUrl = urlResult?.data?.publicUrl ?? null;
-    return { success: true, publicUrl, path: data?.path ?? filename };
-  } catch (err) {
-    console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
-    return { success: false, error: err };
   }
-}
 
 
 
@@ -344,59 +428,54 @@ async function uploadCompressedImageToSupabaseSafe(
 
 
 
-
-
-const debugUploadRaw = async () => {
-  if (!pickedFile) {
-    setUploadError('No file selected');
-    return;
-  }
-  try {
-    console.log('debugUploadRaw: file', pickedFile.name, pickedFile.size);
-    const fname = `ui-upload-${Date.now()}-${pickedFile.name.replace(/\s+/g, '_')}`;
-    const { data, error } = await supabase.storage.from(BUCKETNAME).upload(fname, pickedFile, { upsert: false });
-    console.log('debugUploadRaw result', { data, error });
-    if (error) {
-      setUploadError(error.message || JSON.stringify(error));
+  const debugUploadRaw = async () => {
+    if (!pickedFile) {
+      setUploadError('No file selected');
       return;
     }
-    const url = await supabase.storage.from(BUCKETNAME).getPublicUrl(data.path);
-    setUploadedImageUrl(url?.data?.publicUrl ?? null);
-  } catch (err) {
-    console.error('debugUploadRaw exception', err);
-    setUploadError((err as any)?.message ?? 'Upload exception');
-  }
-};
-
-
-
-
-
-
-
-
-const handleUpload = async () => {
-  if (!pickedFile) return setUploadError('Select a file first');
-  setUploading(true);
-  setUploadError(null);
-  try {
-    const compressed = await compressImageFile(pickedFile, 0.35, 1200).catch(() => pickedFile);
-    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
-    if (!res.success) {
-      console.error('[handleUpload] upload failed', res.error);
-      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
-      return;
+    try {
+      console.log('debugUploadRaw: file', pickedFile.name, pickedFile.size);
+      const fname = `ui-upload-${Date.now()}-${pickedFile.name.replace(/\s+/g, '_')}`;
+      const { data, error } = await supabase.storage.from(BUCKETNAME).upload(fname, pickedFile, { upsert: false });
+      console.log('debugUploadRaw result', { data, error });
+      if (error) {
+        setUploadError(error.message || JSON.stringify(error));
+        return;
+      }
+      const url = await supabase.storage.from(BUCKETNAME).getPublicUrl(data.path);
+      setUploadedImageUrl(url?.data?.publicUrl ?? null);
+    } catch (err) {
+      console.error('debugUploadRaw exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
     }
-    setUploadedImageUrl(res.publicUrl || null);
-    console.log('[handleUpload] success', res);
-  } catch (err) {
-    console.error('[handleUpload] exception', err);
-    setUploadError((err as any)?.message ?? 'Upload exception');
-  } finally {
-    setUploading(false);
-  }
-};
+  };
 
+
+
+
+
+
+
+  const handleUpload = async () => {
+    if (!pickedFile) return setUploadError('Select a file first');
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const compressed = await compressImageFile(pickedFile, 0.35, 1200).catch(() => pickedFile as any);
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+      if (!res.success) {
+        console.error('[handleUpload] upload failed', res.error);
+        setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+        return;
+      }
+      setUploadedImageUrl(res.publicUrl || null);
+    } catch (err) {
+      console.error('[handleUpload] exception', err);
+      setUploadError((err as any)?.message ?? 'Upload exception');
+    } finally {
+      setUploading(false);
+    }
+  };
 
 
 
@@ -1039,12 +1118,45 @@ try {
     }
   };
 
-  const loadRestaurantInfo = () => {
-    const savedInfo = JSON.parse(localStorage.getItem('restaurantInfo') || 'null');
-    if (savedInfo) {
-      setRestaurantInfo(savedInfo);
+const loadRestaurantInfo = async () => {
+  try {
+    setRestaurantLoading(true); // if you already have this state, otherwise ignore
+    // fetch the single row (if you store only one row; if many rows adapt query)
+    const { data, error } = await supabase
+      .from('restaurant_info')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      // "No rows found" style error in older clients — treat as empty
+      setRestaurantInfo(null);
+      return;
     }
-  };
+
+    if (error) {
+      console.error('Supabase error loading restaurant info:', error);
+      // fallback to localStorage if you want:
+      const saved = JSON.parse(localStorage.getItem('restaurantInfo') || 'null');
+      if (saved) setRestaurantInfo(saved);
+      return;
+    }
+
+    // store fetched record in state and in localStorage cache (optional)
+    setRestaurantInfo(data ?? null);
+    try {
+      localStorage.setItem('restaurantInfo', JSON.stringify(data ?? null));
+    } catch (e) {
+      // ignore localStorage write errors
+    }
+  } catch (err) {
+    console.error('Unexpected error in loadRestaurantInfo', err);
+    const saved = JSON.parse(localStorage.getItem('restaurantInfo') || 'null');
+    if (saved) setRestaurantInfo(saved);
+  } finally {
+    setRestaurantLoading(false);
+  }
+};
 
   const loadAdmins = () => {
     const savedAdmins = JSON.parse(localStorage.getItem('adminUsers') || '[]');
@@ -1318,11 +1430,88 @@ const handleEditMenuItem = async (itemData: any) => {
     setLoading(false);
   };
 
-  const updateRestaurantInfo = (info: any) => {
-    setRestaurantInfo(info);
-    localStorage.setItem('restaurantInfo', JSON.stringify(info));
-    setShowRestaurantInfoModal(false);
-  };
+// Replace your existing updateRestaurantInfo with this robust implementation
+const updateRestaurantInfo = async (info: any) => {
+  // local saving state (avoid clobbering other global loading)
+  try {
+    // optional: if you maintain a saving state hook in file, use it instead
+    if (typeof setSaving === 'function') setSaving(true);
+
+    // normalize payload: remove undefined values
+    const payload: Record<string, any> = {};
+    Object.entries(info || {}).forEach(([k, v]) => {
+      if (v !== undefined) payload[k] = v;
+    });
+
+    // If there is an id provided, try upsert (so we update existing row).
+    // If id is undefined/null, insert a new row.
+    let resultData = null;
+    if (payload.id !== undefined && payload.id !== null && payload.id !== '') {
+      // ensure id type matches your DB pk type (int or uuid)
+      // If your id is serial/int but the incoming id is string, coerce:
+      // payload.id = Number(payload.id) // uncomment if needed
+
+      const { data, error } = await supabase
+        .from('restaurant_info')
+        .upsert(payload, { onConflict: 'id', returning: 'representation' });
+
+      if (error) {
+        console.error('Supabase upsert error (updateRestaurantInfo):', error);
+        // Common error: "new row violates row-level security policy" => RLS problem
+        // Show helpful message for debugging:
+        alert(`Save failed: ${error.message || JSON.stringify(error)}`);
+        return false;
+      }
+
+      resultData = Array.isArray(data) ? data[0] : data;
+    } else {
+      // Insert new row (no id provided)
+      const { data, error } = await supabase
+        .from('restaurant_info')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Supabase insert error (updateRestaurantInfo):', error);
+        alert(`Insert failed: ${error.message || JSON.stringify(error)}`);
+        return false;
+      }
+
+      resultData = data;
+    }
+
+    // Update React state (replace variable names below if you use different names)
+    if (typeof setRestaurantInfo === 'function') {
+      setRestaurantInfo(resultData);
+    } else {
+      console.warn('setRestaurantInfo not found; update aborted for UI state');
+    }
+
+    // optional cache to localStorage
+    try {
+      localStorage.setItem('restaurant_info', JSON.stringify(resultData));
+    } catch (e) { /* ignore */ }
+
+    // success feedback (if you have UI to show)
+    if (typeof showSuccessToast === 'function') showSuccessToast('Restaurant info saved');
+    else console.info('Restaurant info saved', resultData);
+
+    return true;
+  } catch (err: any) {
+    console.error('Unexpected error in updateRestaurantInfo:', err);
+    alert('Unexpected error while saving. See console for details.');
+    return false;
+  } finally {
+    if (typeof setSaving === 'function') setSaving(false);
+  }
+};
+
+
+
+
+
+
 
   const approveReview = async (reviewId: number) => {
     try {
@@ -1355,7 +1544,6 @@ const handleEditMenuItem = async (itemData: any) => {
 
 
 
-
 const deleteReview = async (reviewId: number) => {
   // if (!confirm('Are you sure you want to delete this review?')) return;
 
@@ -1370,31 +1558,41 @@ const deleteReview = async (reviewId: number) => {
       body: JSON.stringify({ reviewId: Number(reviewId) })
     });
 
+    // read raw text so we can log or attempt JSON parse for both ok and non-ok
+    const raw = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = { raw }; }
+
     if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.warn('Server delete returned non-OK:', res.status, txt);
-      showErrorToast('Failed to delete review (network).');
+      console.error('[deleteReview] server returned non-OK', res.status, body);
+      // show server-provided error if any, otherwise a generic message
+      const serverMsg = body?.error || body?.message || (body?.raw && String(body.raw)) || 'Unknown server error';
+      showErrorToast('Failed to delete review: ' + serverMsg);
+      setReviews(prev); // revert optimistic update
+      return;
+    }
+
+    // res.ok
+    if (!body || body.success === false) {
+      console.warn('[deleteReview] delete responded but reported failure:', body);
+      const serverMsg = body?.error || 'Delete failed';
+      showErrorToast('Failed to delete review: ' + serverMsg);
       setReviews(prev); // revert
       return;
     }
 
-    const data = await res.json().catch(() => null);
-    if (!data || !data.success) {
-      console.warn('Server delete error:', data);
-      showErrorToast('Failed to delete review. Please try again.');
-      setReviews(prev); // revert
-      return;
-    }
-
+    console.log('[deleteReview] success:', body);
     showSuccessToast('Review deleted successfully!');
-    // optional: refresh from server to be sure
+    // optional: refresh list from server
     await loadReviews();
   } catch (err) {
-    console.log('Error deleting review:', err);
-    showErrorToast('Error deleting review. Please try again.');
-    setReviews(prev); // revert
+    // network-level or unexpected JS error
+    console.error('[deleteReview] network / unexpected error:', err);
+    showErrorToast('Failed to delete review (network). See console for details.');
+    setReviews(prev); // revert optimistic update
   }
 };
+
 
 
 
@@ -1899,8 +2097,69 @@ const deleteReview = async (reviewId: number) => {
               </div>
             </div>
 
+<div className="bg-white rounded-2xl shadow-lg p-8 mt-8">
+  <h2 className="text-2xl font-semibold mb-6 text-gray-800">User Questions</h2>
+
+  {loadingQuestions ? (
+    <p>Loading…</p>
+  ) : (
+    <div className="space-y-4">
+      {userQuestions.map((q) => (
+        <div key={q.id} className="border border-gray-200 rounded-lg p-4">
+          <p className="font-semibold text-gray-800">{q.question}</p>
+          {q.is_answered ? (
+            <p className="text-green-600 mt-2">{q.answer}</p>
+          ) : (
+            (userType === 'admin' || userType === 'superadmin') && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target as HTMLFormElement);
+                  replyToQuestion(q.id, formData.get('answer') as string);
+                }}
+                className="mt-2 space-y-2"
+              >
+                <textarea
+                  name="answer"
+                  className="w-full border p-2 rounded"
+                  placeholder="Write reply…"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="bg-orange-600 text-white px-3 py-1 rounded"
+                >
+                  Reply
+                </button>
+              </form>
+            )
+          )}
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+
+
+
+
+
+
             {/* Reviews Management (Owner Only) */}
             {userType === 'superadmin' && (
+
+
+
+
+
+
+
+
+
+
+
+
+
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-6">Customer Reviews</h2>
                 <div className="space-y-4">
@@ -2163,91 +2422,160 @@ const deleteReview = async (reviewId: number) => {
         )}
 
         {/* Categories Tab */}
-        {activeTab === 'categories' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-2xl shadow-lg p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold">Menu Categories</h2>
-                <button
-                  onClick={() => setShowAddCategoryModal(true)}
-                  className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  <i className="ri-add-line mr-2"></i>
-                  Add Category
-                </button>
-              </div>
+        {/* Categories Tab */}
+        
+        
+        
+        
+        
+        
+{activeTab === "categories" && (
+  <div className="space-y-6">
+    <div className="bg-white rounded-2xl shadow-lg p-6">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-semibold">Menu Categories</h2>
+        <button
+          onClick={() => setShowAddCategoryModal(true)}
+          className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+        >
+          <i className="ri-add-line mr-2"></i>
+          Add Category
+        </button>
+      </div>
 
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {categories.length === 0 ? (
-                  <div className="col-span-3 text-center py-8">
-                    <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-1">
-                      <i className="ri-folder-line text-2xl text-gray-400"></i>
-                    </div>
-                    <p className="text-gray-500 mb-4">No categories yet</p>
-                    <button
-                      onClick={() => setShowAddCategoryModal(true)}
-                      className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                    >
-                      Add First Category
-                    </button>
-                  </div>
-                ) : (
-                  categories.map((category) => (
-                    <div key={category.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                            {category.icon && category.icon.startsWith('data:image') ? (
-                              <img 
-                                src={category.icon} 
-                                alt={category.name}
-                                className="w-8 h-8 object-cover rounded-full"
-                              />
-                            ) : (
-                              <i className={`${category.icon || 'ri-restaurant-line'} text-orange-600`}></i>
-                            )}
-                          </div>
-                          <div>
-                            <h3 className="font-semibold">{category.name}</h3>
-                            <p className="text-sm text-gray-600">
-                              {menuItems.filter(item => item.category_id === category.id).length} items
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <p className="text-sm text-gray-600 mb-4 line-clamp-2">{category.description}</p>
-
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleViewCategory(category)}
-                          className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                        >
-                          <i className="ri-eye-line"></i>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedCategory(category);
-                            setShowEditCategoryModal(true);
-                          }}
-                          className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                        >
-                          <i className="ri-edit-line"></i>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCategory(category.id)}
-                          className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-                        >
-                          <i className="ri-delete-bin-line"></i>
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+      {/* Category List */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {categories.length === 0 ? (
+          <div className="col-span-3 text-center py-8">
+            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-1">
+              <i className="ri-folder-line text-2xl text-gray-400"></i>
             </div>
+            <p className="text-gray-500 mb-4">No categories yet</p>
+            <button
+              onClick={() => setShowAddCategoryModal(true)}
+              className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+            >
+              Add First Category
+            </button>
           </div>
+        ) : (
+          categories.map((category) => {
+            // compute icon source (URL or Supabase publicUrl)
+            let iconSrc: string | null = null;
+            if (category.icon) {
+              if (
+                category.icon.startsWith("http://") ||
+                category.icon.startsWith("https://") ||
+                category.icon.startsWith("data:")
+              ) {
+                iconSrc = category.icon;
+              } else {
+                const { data } = supabase
+                  .storage
+                  .from("menu-images")
+                  .getPublicUrl(category.icon);
+                iconSrc = data?.publicUrl ?? null;
+              }
+            }
+
+            return (
+              <div
+                key={category.id}
+                className="border border-gray-200 rounded-lg p-4"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                      {iconSrc ? (
+                        <img
+                          src={iconSrc}
+                          alt={category.name}
+                          className="w-8 h-8 object-cover rounded-full"
+                          onError={(e) =>
+                            ((e.currentTarget as HTMLImageElement).style.display =
+                              "none")
+                          }
+                        />
+                      ) : (
+                        <i className="ri-restaurant-line text-orange-600"></i>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">{category.name}</h3>
+                      <p className="text-sm text-gray-600">
+                        {
+                          menuItems.filter(
+                            (item) => item.category_id === category.id
+                          ).length
+                        }{" "}
+                        items
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                  {category.description}
+                </p>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleViewCategory(category)}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-eye-line"></i>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedCategory(category);
+                      setShowEditCategoryModal(true);
+                    }}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-edit-line"></i>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCategory(category.id)}
+                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                  >
+                    <i className="ri-delete-bin-line"></i>
+                  </button>
+                </div>
+              </div>
+            );
+          })
         )}
+
+      </div>
+
+
+
+
+    </div>
+
+
+
+
+
+
+
+
+    
+  </div>
+
+
+
+
+
+
+
+
+
+
+)}
+
+
       </div>
 
       {/* Add Category Modal */}
@@ -2289,22 +2617,88 @@ const deleteReview = async (reviewId: number) => {
                 />
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Icon</label>
-                <select
-                  name="icon"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
-                >
-                  <option value="ri-restaurant-line">🍽️ Restaurant</option>
-                  <option value="ri-cake-2-line">🥟 Dumplings</option>
-                  <option value="ri-cup-line">☕ Beverages</option>
-                  <option value="ri-cake-line">🍰 Desserts</option>
-                  <option value="ri-bowl-line">🍲 Main Dishes</option>
-                  <option value="ri-cake-3-line">🧁 Sweets</option>
-                  <option value="ri-fire-line">🌶️ Spicy</option>
-                  <option value="ri-leaf-line">🌱 Vegetarian</option>
-                </select>
-              </div>
+{/* Icon (upload) */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Icon (Optional)</label>
+
+  <div className="flex items-center space-x-3">
+    {/* allow pasting a url directly (user may prefer url) */}
+    <input
+      type="text"
+      name="iconUrl"
+      defaultValue={selectedCategory?.icon ?? ''}
+      placeholder="https://example.com/icon.png (or leave blank to upload)"
+      className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    />
+
+    {/* file picker label */}
+    <label
+      htmlFor="add-category-icon-file"
+      className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+    >
+      <i className="ri-upload-line mr-2"></i>
+      <span className="text-sm">Choose file</span>
+    </label>
+
+    {/* hidden file input — unique id so it doesn't clash with other pickers */}
+    <input
+      id="add-category-icon-file"
+      type="file"
+      accept="image/*"
+      onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+      className="hidden"
+    />
+  </div>
+
+  {/* hidden input that the form will submit as `icon` — we set its value to the uploadedImageUrl (if any) */}
+  <input type="hidden" name="icon" value={uploadedImageUrl ?? ''} />
+
+  {/* Upload controls + preview (reuses your existing upload helpers/state) */}
+  <div className="mt-4">
+    <div className="flex items-center space-x-3">
+      <button
+        type="button"
+        onClick={handleUpload}
+        disabled={uploading || !pickedFile}
+        className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+      >
+        Upload
+      </button>
+
+      <button
+        type="button"
+        onClick={debugUploadRaw}
+        className="px-3 py-2 bg-gray-100 rounded"
+      >
+        Debug Raw
+      </button>
+
+      {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+    </div>
+
+    {/* picked-file preview */}
+    {pickedFile && (
+      <div className="mt-3 flex items-center space-x-4">
+        {previewUrl && <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />}
+        <div>
+          <div className="font-medium">{pickedFile.name}</div>
+          <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+        </div>
+      </div>
+    )}
+
+    {/* uploaded image preview (final URL) */}
+    {uploadedImageUrl && (
+      <div className="mt-3">
+        <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+        <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+      </div>
+    )}
+
+    {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+  </div>
+</div>
+
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
@@ -2371,24 +2765,89 @@ const deleteReview = async (reviewId: number) => {
                   required
                 />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Icon</label>
-                <select
-                  name="icon"
-                  defaultValue={selectedCategory.icon}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
-                >
-                  <option value="ri-restaurant-line">🍽️ Restaurant</option>
-                  <option value="ri-cake-2-line">🥟 Dumplings</option>
-                  <option value="ri-cup-line">☕ Beverages</option>
-                  <option value="ri-cake-line">🍰 Desserts</option>
-                  <option value="ri-bowl-line">🍲 Main Dishes</option>
-                  <option value="ri-cake-3-line">🧁 Sweets</option>
-                  <option value="ri-fire-line">🌶️ Spicy</option>
-                  <option value="ri-leaf-line">🌱 Vegetarian</option>
-                </select>
-              </div>
+                  
+{/* Icon (upload) */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Icon (Optional)</label>
+
+  <div className="flex items-center space-x-3">
+    {/* allow pasting a url directly (user may prefer url) */}
+    <input
+      type="text"
+      name="iconUrl"
+      defaultValue={selectedCategory?.icon ?? ''}
+      placeholder="https://example.com/icon.png (or leave blank to upload)"
+      className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    />
+
+    {/* file picker label */}
+    <label
+      htmlFor="add-category-icon-file"
+      className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+    >
+      <i className="ri-upload-line mr-2"></i>
+      <span className="text-sm">Choose file</span>
+    </label>
+
+    {/* hidden file input — unique id so it doesn't clash with other pickers */}
+    <input
+      id="add-category-icon-file"
+      type="file"
+      accept="image/*"
+      onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+      className="hidden"
+    />
+  </div>
+
+  {/* hidden input that the form will submit as `icon` — we set its value to the uploadedImageUrl (if any) */}
+  <input type="hidden" name="icon" value={uploadedImageUrl ?? ''} />
+
+  {/* Upload controls + preview (reuses your existing upload helpers/state) */}
+  <div className="mt-4">
+    <div className="flex items-center space-x-3">
+      <button
+        type="button"
+        onClick={handleUpload}
+        disabled={uploading || !pickedFile}
+        className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+      >
+        Upload
+      </button>
+
+      <button
+        type="button"
+        onClick={debugUploadRaw}
+        className="px-3 py-2 bg-gray-100 rounded"
+      >
+        Debug Raw
+      </button>
+
+      {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+    </div>
+
+    {/* picked-file preview */}
+    {pickedFile && (
+      <div className="mt-3 flex items-center space-x-4">
+        {previewUrl && <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />}
+        <div>
+          <div className="font-medium">{pickedFile.name}</div>
+          <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+        </div>
+      </div>
+    )}
+
+    {/* uploaded image preview (final URL) */}
+    {uploadedImageUrl && (
+      <div className="mt-3">
+        <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+        <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+      </div>
+    )}
+
+    {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+  </div>
+</div>
+
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
@@ -2605,193 +3064,258 @@ const deleteReview = async (reviewId: number) => {
       )}
 
       {/* Edit Menu Item Modal */}
-      {showEditItemModal && selectedItem && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-semibold">Edit Menu Item</h3>
-              <button
-                onClick={() => setShowEditItemModal(false)}
-                className="text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <i className="ri-close-line text-xl"></i>
-              </button>
-            </div>
-
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target as HTMLFormElement);
-              handleEditMenuItem({
-                categoryId: formData.get('categoryId') as string,
-                name: formData.get('name') as string,
-                description: formData.get('description') as string,
-                price: parseFloat(formData.get('price') as string),
-                imageUrl: uploadedImageUrl || (formData.get('imageUrl') as string || ''),
-
-                ingredients: formData.get('ingredients') as string,
-                isVegetarian: formData.get('isVegetarian') === 'on',
-                preparationTime: parseInt(formData.get('preparationTime') as string) || 15,
-                isAvailable: formData.get('isAvailable') === 'on'
-              });
-            }} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-                <select
-                  name="categoryId"
-                  defaultValue={selectedItem.category_id}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
-                  required
-                >
-                  <option value="">Select Category</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  defaultValue={selectedItem.name}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                <textarea
-                  name="description"
-                  rows={3}
-                  defaultValue={selectedItem.description}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Price (₨)</label>
-                  <input
-                    type="number"
-                    name="price"
-                    min="0"
-                    step="1"
-                    defaultValue={selectedItem.price}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Prep Time (min)</label>
-                  <input
-                    type="number"
-                    name="preparationTime"
-                    min="1"
-                    defaultValue={selectedItem.preparation_time}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  />
-                </div>
-              </div>
-              
-
-
-{/* Image URL (Optional) */}
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-2">Image URL (Optional)</label>
-
-  <div className="flex items-center space-x-3">
-    <input
-      type="url"
-      name="imageUrl"
-      placeholder="https://example.com/image.jpg"
-      className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-    />
-
-    {/* file upload button */}
-    <label className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-      <i className="ri-upload-line mr-2"></i>
-      <span className="text-sm">Upload</span>
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
-
-        className="hidden"
-      />
-    </label>
-  </div>
-
-  {/* preview */}
-  {uploadingImage && <p className="text-sm text-gray-500 mt-2">Uploading image... please wait</p>}
-  {uploadedImageUrl && (
-    <div className="mt-3">
-      <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
-      <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
-    </div>
-  )}
-</div>
+     
 
 
 
 
 
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients (Optional)</label>
-                <input
-                  type="text"
-                  name="ingredients"
-                  defaultValue={selectedItem.ingredients}
-                  placeholder="Chicken, flour, onions, spices"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                />
-              </div>
-              
-              <div className="flex items-center space-x-6">
-                <label className="flex items-center">
-                  <input 
-                    type="checkbox" 
-                    name="isVegetarian" 
-                    defaultChecked={selectedItem.is_vegetarian}
-                    className="mr-2 w-4 h-4 text-orange-600" 
-                  />
-                  <span className="text-sm">Vegetarian</span>
-                </label>
-                <label className="flex items-center">
-                  <input 
-                    type="checkbox" 
-                    name="isAvailable" 
-                    defaultChecked={selectedItem.is_available}
-                    className="mr-2 w-4 h-4 text-orange-600" 
-                  />
-                  <span className="text-sm">Available</span>
-                </label>
-              </div>
-              
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowEditItemModal(false)}
-                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  Update Item
-                </button>
-              </div>
-            </form>
+
+
+{showEditItemModal && selectedItem && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-semibold">Edit Menu Item</h3>
+        <button
+          onClick={() => setShowEditItemModal(false)}
+          className="text-gray-400 hover:text-gray-600 cursor-pointer"
+          aria-label="Close edit modal"
+        >
+          <i className="ri-close-line text-xl"></i>
+        </button>
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.target as HTMLFormElement);
+          handleEditMenuItem({
+            categoryId: formData.get('categoryId') as string,
+            name: (formData.get('name') as string) || '',
+            description: (formData.get('description') as string) || '',
+            price: parseFloat(formData.get('price') as string),
+            // prefer uploadedImageUrl if available, otherwise use the URL from input, otherwise empty string
+            imageUrl: uploadedImageUrl || (formData.get('imageUrl') as string) || '',
+
+            ingredients: (formData.get('ingredients') as string) || '',
+            isVegetarian: formData.get('isVegetarian') === 'on',
+            preparationTime: parseInt(formData.get('preparationTime') as string) || 15,
+            isAvailable: formData.get('isAvailable') === 'on',
+            // include id so handler knows which to update
+            id: selectedItem.id
+          });
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+          <select
+            name="categoryId"
+            defaultValue={selectedItem.category_id ?? ''}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 pr-8"
+            required
+          >
+            <option value="">Select Category</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+          <input
+            type="text"
+            name="name"
+            defaultValue={selectedItem.name}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+          <textarea
+            name="description"
+            rows={3}
+            defaultValue={selectedItem.description}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Price (₨)</label>
+            <input
+              type="number"
+              name="price"
+              min="0"
+              step="1"
+              defaultValue={selectedItem.price}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Prep Time (min)</label>
+            <input
+              type="number"
+              name="preparationTime"
+              min="1"
+              defaultValue={selectedItem.preparation_time}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            />
           </div>
         </div>
-      )}
+
+        {/* Image URL + file upload */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Image URL (Optional)</label>
+
+          <div className="flex items-center space-x-3">
+            <input
+              type="url"
+              name="imageUrl"
+              defaultValue={selectedItem.image_url ?? ''}
+              placeholder="https://example.com/image.jpg"
+              className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            />
+
+            {/* file upload label (click opens file picker) */}
+            <label
+              htmlFor="edit-item-file"
+              className="inline-flex items-center px-3 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+            >
+              <i className="ri-upload-line mr-2"></i>
+              <span className="text-sm">Choose file</span>
+            </label>
+
+            {/* actual hidden file input */}
+            <input
+              id="edit-item-file"
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleFileSelectFromFile(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+          </div>
+
+          {/* Upload controls & preview area */}
+          <div className="mt-4">
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={handleUpload}
+                disabled={uploading || !pickedFile}
+                className="px-4 py-2 bg-orange-600 text-white rounded disabled:opacity-50"
+              >
+                Upload
+              </button>
+              <button
+                type="button"
+                onClick={debugUploadRaw}
+                className="px-3 py-2 bg-gray-100 rounded"
+              >
+                Debug Raw
+              </button>
+
+              {uploading && <span className="text-sm text-gray-500">Uploading image…</span>}
+            </div>
+
+            {/* picked-file preview */}
+            {pickedFile && (
+              <div className="mt-3 flex items-center space-x-4">
+                {previewUrl && (
+                  <img src={previewUrl} alt="preview" className="w-24 h-24 object-cover rounded" />
+                )}
+                <div>
+                  <div className="font-medium">{pickedFile.name}</div>
+                  <div className="text-sm text-gray-500">{(pickedFile.size / 1024).toFixed(1)} KB</div>
+                </div>
+              </div>
+            )}
+
+            {/* uploaded image preview (final URL) */}
+            {uploadedImageUrl && (
+              <div className="mt-3">
+                <img src={uploadedImageUrl} alt="Preview" className="w-32 h-24 object-cover rounded-md border" />
+                <p className="text-xs text-gray-500 mt-1 break-all">{uploadedImageUrl}</p>
+              </div>
+            )}
+
+            {/* upload error */}
+            {uploadError && <div className="mt-2 text-sm text-red-600">Upload error: {uploadError}</div>}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients (Optional)</label>
+          <input
+            type="text"
+            name="ingredients"
+            defaultValue={selectedItem.ingredients ?? ''}
+            placeholder="Chicken, flour, onions, spices"
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+          />
+        </div>
+
+        <div className="flex items-center space-x-6">
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              name="isVegetarian"
+              defaultChecked={selectedItem.is_vegetarian}
+              className="mr-2 w-4 h-4 text-orange-600"
+            />
+            <span className="text-sm">Vegetarian</span>
+          </label>
+
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              name="isAvailable"
+              defaultChecked={selectedItem.is_available}
+              className="mr-2 w-4 h-4 text-orange-600"
+            />
+            <span className="text-sm">Available</span>
+          </label>
+        </div>
+
+        <div className="flex space-x-3 pt-4">
+          <button
+            type="button"
+            onClick={() => setShowEditItemModal(false)}
+            className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+          >
+            Update Item
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
+
+
+
+
+
+
+
+
+
 
       {/* Owner Settings Modal */}
       {showOwnerPanel && userType === 'superadmin' && (
@@ -2821,10 +3345,13 @@ const deleteReview = async (reviewId: number) => {
                     </button>
                   </div>
                   <div className="space-y-2 text-sm">
-                    <p><strong>Name:</strong> {restaurantInfo.name}</p>
-                    <p><strong>Phone:</strong> {restaurantInfo.phone}</p>
-                    <p><strong>Email:</strong> {restaurantInfo.email}</p>
-                    <p><strong>Address:</strong> {restaurantInfo.address}</p>
+                    {/* <p><strong>Name:</strong> {restaurantInfo.name}</p> */}
+                    {/* <p><strong>Phone:</strong> {restaurantInfo.phone}</p> */}
+                    {/* <p><strong>Email:</strong> {restaurantInfo.email}</p> */}
+                    {/* <p><strong>Address:</strong> {restaurantInfo.address}</p> */}
+                  
+                  
+                  
                   </div>
                 </div>
 
@@ -2882,7 +3409,7 @@ const deleteReview = async (reviewId: number) => {
       )}
 
       {/* Restaurant Info Modal */}
-      {showRestaurantInfoModal && (
+      {showRestaurantInfoModal && restaurantInfo ? (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
@@ -2898,20 +3425,24 @@ const deleteReview = async (reviewId: number) => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target as HTMLFormElement);
-              updateRestaurantInfo({
-                name: formData.get('name') as string,
-                phone: formData.get('phone') as string,
-                email: formData.get('email') as string,
-                address: formData.get('address') as string,
-                coordinates: formData.get('coordinates') as string
-              });
+// add id from restaurantInfo so function updates instead of inserting
+updateRestaurantInfo({
+  id: restaurantInfo?.id ?? null,
+  name: String(formData.get('name') ?? ''),
+  phone: String(formData.get('phone') ?? ''),
+  email: String(formData.get('email') ?? ''),
+  address: String(formData.get('address') ?? ''),
+  coordinates: String(formData.get('coordinates') ?? '')
+});
+
+
             }} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Restaurant Name</label>
                 <input
                   type="text"
                   name="name"
-                  defaultValue={restaurantInfo.name}
+                  defaultValue={restaurantInfo?.name ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -2921,17 +3452,18 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="tel"
                   name="phone"
-                  defaultValue={restaurantInfo.phone}
+                  defaultValue={restaurantInfo?.phone ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
                   name="email"
-                  defaultValue={restaurantInfo.email}
+                  defaultValue={restaurantInfo?.email ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -2941,7 +3473,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="address"
-                  defaultValue={restaurantInfo.address}
+                  defaultValue={restaurantInfo?.address ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   required
                 />
@@ -2951,7 +3483,7 @@ const deleteReview = async (reviewId: number) => {
                 <input
                   type="text"
                   name="coordinates"
-                  defaultValue={restaurantInfo.coordinates}
+                  defaultValue={restaurantInfo?.coordinates ?? '-'}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   placeholder="28.22886241546525, 83.99098268394296"
                   required
@@ -2975,7 +3507,7 @@ const deleteReview = async (reviewId: number) => {
             </form>
           </div>
         </div>
-      )}
+      ): null}
 
       {/* Add Admin Modal */}
       {showAdminModal && (
@@ -3049,149 +3581,171 @@ const deleteReview = async (reviewId: number) => {
       )}
 
       {/* Category Modal */}
-      {showCategoryModal && selectedCategory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Category Details</h2>
-                <button
-                  onClick={() => setShowCategoryModal(false)}
-                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
-                >
-                  <i className="ri-close-line text-2xl"></i>
-                </button>
-              </div>
+{showCategoryModal && selectedCategory && (() => {
+  // compute selected category icon src (same logic)
+  const selRaw = selectedCategory.icon ?? '';
+  let selectedIconSrc: string | null = (typeof categoryIconMap !== 'undefined') ? categoryIconMap[selectedCategory.id] : null;
 
-              <div className="space-y-6">
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex items-center space-x-4 mb-4">
-                    <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center">
-                      {selectedCategory.icon && selectedCategory.icon.startsWith('data:image') ? (
-                        <img 
-                          src={selectedCategory.icon} 
-                          alt={selectedCategory.name}
-                          className="w-12 h-12 object-cover rounded-full"
-                        />
-                      ) : (
-                        <i className={`${selectedCategory.icon || 'ri-restaurant-line'} text-2xl text-orange-600`}></i>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-semibold">{selectedCategory.name}</h3>
-                      <p className="text-gray-600">
-                        {menuItems.filter(item => item.category_id === selectedCategory.id).length} items in this category
-                      </p>
-                    </div>
-                  </div>
+  if (!selectedIconSrc && selRaw) {
+    if (typeof selRaw === 'string' && (selRaw.startsWith('http://') || selRaw.startsWith('https://') || selRaw.startsWith('data:'))) {
+      selectedIconSrc = selRaw;
+    } else {
+      try {
+        const { data } = supabase.storage.from('menu-images').getPublicUrl(String(selRaw));
+        selectedIconSrc = data?.publicUrl ?? null;
+      } catch (err) {
+        console.warn('getPublicUrl error for selected category', selRaw, err);
+        selectedIconSrc = null;
+      }
+    }
+  }
 
-                  <p className="text-gray-600 mb-4">{selectedCategory.description}</p>
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Category Details</h2>
+            <button
+              onClick={() => setShowCategoryModal(false)}
+              className="text-gray-400 hover:text-gray-600 cursor-pointer"
+            >
+              <i className="ri-close-line text-2xl"></i>
+            </button>
+          </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-center">
-                    <div className="bg-white rounded-lg p-3">
-                      <p className="text-2xl font-bold text-blue-600">
-                        {menuItems.filter(item => item.category_id === selectedCategory.id).length}
-                      </p>
-                      <p className="text-sm text-gray-600">Total Items</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3">
-                      <p className="text-2xl font-bold text-green-600">
-                        {menuItems.filter(item => item.category_id === selectedCategory.id && item.is_available).length}
-                      </p>
-                      <p className="text-sm text-gray-600">Available Items</p>
-                    </div>
-                  </div>
+          <div className="space-y-6">
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                  {selectedIconSrc ? (
+                    <img
+                      src={selectedIconSrc}
+                      alt={selectedCategory.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <i className={`${selectedCategory.icon || 'ri-restaurant-line'} text-3xl text-orange-600`}></i>
+                  )}
                 </div>
 
                 <div>
-                  <h4 className="text-lg font-semibold mb-3">Items in this Category</h4>
-                  <div className="space-y-3">
-                    {(() => {
-                      const categoryItems = menuItems.filter(item => item.category_id === selectedCategory.id);
-                      
-                      if (categoryItems.length === 0) {
-                        return (
-                          <div className="text-center py-8">
-                            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                              <i className="ri-shopping-bag-line text-2xl text-gray-400"></i>
-                            </div>
-                            <p className="text-gray-500 mb-4">No items in this category yet</p>
-                            <button 
-                              onClick={() => {
-                                setShowCategoryModal(false);
-                                setShowAddItemModal(true);
-                              }}
-                              className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                            >
-                              Add First Item
-                            </button>
-                          </div>
-                        );
-                      }
-                      
-                      return categoryItems.map((item: any) => (
-                        <div key={item.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                          <div className="flex items-center space-x-4">
-                            <img 
-                              src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%20clean%20background&width=120&height=120&seq=menu-item&orientation=squarish'} 
-                              alt={item.name}
-                              className="w-12 h-12 object-cover rounded-lg"
-                            />
-                            <div>
-                              <h5 className="font-semibold">{item.name}</h5>
-                              <p className="text-sm text-gray-600">₨{item.price}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              item.is_available 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-red-100 text-red-800'
-                            }`}>
-                              {item.is_available ? 'Available' : 'Out of Stock'}
-                            </span>
-                            <button 
-                              onClick={() => {
-                                setSelectedItem(item);
-                                setShowCategoryModal(false);
-                                setShowEditItemModal(true);
-                              }}
-                              className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                            >
-                              <i className="ri-edit-line"></i>
-                            </button>
-                          </div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
+                  <h3 className="text-xl font-semibold">{selectedCategory.name}</h3>
+                  <p className="text-gray-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id).length} items in this category
+                  </p>
                 </div>
+              </div>
 
-                <div className="flex space-x-4">
-                  <button 
-                    onClick={() => {
-                      setShowCategoryModal(false);
-                      setShowAddItemModal(true);
-                    }}
-                    className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                  >
-                    Add New Item
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setShowCategoryModal(false);
-                      setShowEditCategoryModal(true);
-                    }}
-                    className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
-                  >
-                    Edit Category
-                  </button>
+              <p className="text-gray-600 mb-4">{selectedCategory.description}</p>
+
+              <div className="grid grid-cols-2 gap-4 text-center">
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-2xl font-bold text-blue-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id).length}
+                  </p>
+                  <p className="text-sm text-gray-600">Total Items</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-600">
+                    {menuItems.filter(item => item.category_id === selectedCategory.id && item.is_available).length}
+                  </p>
+                  <p className="text-sm text-gray-600">Available Items</p>
                 </div>
               </div>
             </div>
+
+            <div>
+              <h4 className="text-lg font-semibold mb-3">Items in this Category</h4>
+              <div className="space-y-3">
+                {(() => {
+                  const categoryItems = menuItems.filter(item => item.category_id === selectedCategory.id);
+
+                  if (categoryItems.length === 0) {
+                    return (
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <i className="ri-shopping-bag-line text-2xl text-gray-400"></i>
+                        </div>
+                        <p className="text-gray-500 mb-4">No items in this category yet</p>
+                        <button
+                          onClick={() => {
+                            setShowCategoryModal(false);
+                            setShowAddItemModal(true);
+                          }}
+                          className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+                        >
+                          Add First Item
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return categoryItems.map((item: any) => (
+                    <div key={item.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-center space-x-4">
+                        <img
+                          src={item.image_url || 'https://via.placeholder.com/120x120?text=Dish'}
+                          alt={item.name}
+                          className="w-12 h-12 object-cover rounded-lg"
+                        />
+                        <div>
+                          <h5 className="font-semibold">{item.name}</h5>
+                          <p className="text-sm text-gray-600">₨{item.price}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-2 py-1 rounded-full text-xs ${item.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {item.is_available ? 'Available' : 'Out of Stock'}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setSelectedItem(item);
+                            setShowCategoryModal(false);
+                            setShowEditItemModal(true);
+                          }}
+                          className="text-orange-600 hover:text-orange-700 cursor-pointer"
+                        >
+                          <i className="ri-edit-line"></i>
+                        </button>
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+
+            <div className="flex space-x-4">
+              <button
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  setShowAddItemModal(true);
+                }}
+                className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+              >
+                Add New Item
+              </button>
+              <button
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  setShowEditCategoryModal(true);
+                }}
+                className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+              >
+                Edit Category
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      </div>
+    </div>
+  );
+})()}
+
 
       {/* Order Modal */}
       <OrderModal

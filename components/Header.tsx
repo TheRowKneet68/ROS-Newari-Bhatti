@@ -3,45 +3,113 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+
+
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userType, setUserType] = useState('');
   const [userName, setUserName] = useState('');
   const [cartCount, setCartCount] = useState(0);
+const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
 
-  useEffect(() => {
-    // Check login status
-    const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    const type = localStorage.getItem('userType') || 'user';
-    const userData = localStorage.getItem('userData');
-    
-    setIsLoggedIn(loggedIn);
-    setUserType(type);
-    
-    if (userData) {
-      const user = JSON.parse(userData);
-      setUserName(user.firstName || user.email || 'User');
+
+const [restaurantLoading, setRestaurantLoading] = useState(true);
+const [restaurantError, setRestaurantError] = useState<string | null>(null);
+
+
+
+
+
+
+
+
+
+
+
+
+  
+useEffect(() => {
+  let mounted = true;
+
+  // --------------------------
+  // 1) Handle login + user data
+  // --------------------------
+  const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
+  const type = localStorage.getItem('userType') || 'user';
+  const userData = localStorage.getItem('userData');
+
+  setIsLoggedIn(loggedIn);
+  setUserType(type);
+
+  if (userData) {
+    const user = JSON.parse(userData);
+    setUserName(user.firstName || user.email || 'User');
+  }
+
+  // --------------------------
+  // 2) Load restaurant info from Supabase
+  // --------------------------
+  async function loadFromSupabase() {
+    try {
+      setRestaurantLoading(true);
+      setRestaurantError(null);
+
+      const { data, error, status } = await supabase
+        .from('restaurant_info')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (error && status !== 406) {
+        throw error;
+      }
+
+      if (mounted) {
+        const row = Array.isArray(data) && data.length ? data[0] : null;
+        setrestaurant_info(row);
+      }
+    } catch (err: any) {
+      console.error('Failed to load restaurant_info from Supabase:', err);
+      if (mounted) {
+        setRestaurantError(err?.message ?? 'Failed to load restaurant info');
+      }
+    } finally {
+      if (mounted) {
+        setRestaurantLoading(false);
+      }
     }
+  }
 
-    // Load cart count
+  loadFromSupabase();
+
+  // --------------------------
+  // 3) Cart handling
+  // --------------------------
+  updateCartCount();
+
+  const handleStorageChange = () => {
     updateCartCount();
-    
-    // Listen for cart updates
-    const handleStorageChange = () => {
-      updateCartCount();
-    };
-    
-    window.addEventListener('storage', handleStorageChange);
-    
-    // Also check for cart updates periodically
-    const interval = setInterval(updateCartCount, 1000);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
-    };
-  }, []);
+  };
+
+  window.addEventListener('storage', handleStorageChange);
+  const interval = setInterval(updateCartCount, 1000);
+
+  // Cleanup
+  return () => {
+    mounted = false;
+    window.removeEventListener('storage', handleStorageChange);
+    clearInterval(interval);
+  };
+}, []);
+
 
   const updateCartCount = () => {
     const cartItems = JSON.parse(localStorage.getItem('cartItems') || '{}');
@@ -65,7 +133,7 @@ export default function Header() {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/" className="text-2xl font-['Pacifico'] text-orange-600 cursor-pointer">
-            Newari Bhatti and Kathmandu Momo Ghar
+             {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}
           </Link>
 
           {/* Desktop Navigation */}

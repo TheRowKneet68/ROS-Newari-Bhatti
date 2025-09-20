@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Newari Bhatti & Kathmandu Momo Ghar",
+  title: "Newari Bhatti & Kathmandu Momo House",
 };
 
 export default function RootLayout({

@@ -181,6 +181,9 @@ const categoryIconMap = useMemo(() => {
         Object.entries(next).map(([k, v]) => [Number(k), v])
       ) as { [key: number]: number };
       saveCart(normalized);
+
+
+
     } catch (e) {
       console.warn('Error updating cart', e);
       // fallback to state-only update
@@ -226,6 +229,36 @@ const categoryIconMap = useMemo(() => {
       });
     }
   };
+
+
+// normalize URL from DB: return null if empty or unsafe, prepend https:// if protocol missing
+const normalizeUrl = (raw?: string | null): string | null => {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // disallow javascript: and other unsafe schemes
+  const unsafe = /^\s*javascript:/i;
+  if (unsafe.test(s)) return null;
+
+  // allow tel: and mailto: as-is
+  if (/^(tel:|mailto:)/i.test(s)) return s;
+
+  // if already with protocol, keep it
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // if starts with // (protocol-relative) prepend https:
+  if (/^\/\//.test(s)) return `https:${s}`;
+
+  // otherwise, assume missing protocol and add https://
+  return `https://${s}`;
+};
+
+
+
+
+
+
 
   const getTotalItems = () => {
     return Object.values(cartItems).reduce((sum, qty) => sum + (qty as number), 0);
@@ -351,39 +384,208 @@ const categoryIconMap = useMemo(() => {
     setSearchResults(results);
   }, [searchTerm, menuItems]);
 
-  const loadMenuData = async () => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({ action: 'getMenuData' })
+
+
+
+
+
+
+
+
+// filtered + searched items for menu listing (case-insensitive, name/description/category)
+// Place this after the useEffect that sets searchResults (before parseTimeSafe)
+const filteredItems = useMemo(() => {
+  // shallow copy so we don't mutate original menuItems
+  let items = Array.isArray(menuItems) ? [...menuItems] : [];
+
+  // Filter by selectedCategory if set and not 'all'
+  if (selectedCategory && selectedCategory !== 'all') {
+    items = items.filter((it: any) => {
+      // item may have category_id, or category object with id/slug
+      if (String(it.category_id) === String(selectedCategory)) return true;
+      if (it.category) {
+        if (String(it.category.id) === String(selectedCategory)) return true;
+        if (String(it.category.slug) === String(selectedCategory)) return true;
+      }
+      return false;
+    });
+  }
+
+  // Apply search across name, description and category fields (case-insensitive)
+  const q = (searchTerm || '').trim().toLowerCase();
+  if (q.length > 0) {
+    items = items.filter((it: any) => {
+      const name = String(it.name || '').toLowerCase();
+      const desc = String(it.description || '').toLowerCase();
+      const catName = String(it.category?.name || it.category || '').toLowerCase();
+      const catSlug = String(it.category?.slug || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        desc.includes(q) ||
+        catName.includes(q) ||
+        (catSlug && catSlug.includes(q))
+      );
+    });
+  }
+
+  // Sort final list A → Z by name (safe fallback)
+  items.sort((a: any, b: any) => {
+    const an = String(a.name || '').toLowerCase();
+    const bn = String(b.name || '').toLowerCase();
+    return an.localeCompare(bn);
+  });
+
+  return items;
+}, [menuItems, searchTerm, selectedCategory]);
+
+
+
+
+
+
+
+const parseTimeSafe = (v: any): number => {
+  if (!v && v !== 0) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const asNum = Number(v);
+    if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+    const asDate = Date.parse(v);
+    if (!Number.isNaN(asDate)) return asDate;
+    return 0;
+  }
+  try {
+    const cast = new Date(v as any).getTime();
+    return Number.isNaN(cast) ? 0 : cast;
+  } catch {
+    return 0;
+  }
+};
+
+const deriveFlagsForItem = (item: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+  const createdRaw = item.created_at ?? null;
+  const updatedRaw = item.updated_at ?? null;
+
+  const created = parseTimeSafe(createdRaw);
+  const updated = parseTimeSafe(updatedRaw);
+
+  const isEdited = typeof item.isEdited === 'boolean'
+    ? !!item.isEdited
+    : (updated > 0 && created > 0 && updated !== created);
+
+  const isNew = typeof item.isNew === 'boolean'
+    ? !!item.isNew
+    : (created > 0 && (now - created) <= newThresholdMs);
+
+  const lastChanged = Math.max(created || 0, updated || 0);
+
+  return { created, updated, isEdited, isNew, lastChanged };
+};
+
+const loadMenuData = async () => {
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({ action: 'getMenuData' })
+    });
+
+    const data = await response.json();
+
+    // DEBUG (optional): console.debug('admin-menu-service returned menuItems sample:', (data?.menuItems || []).slice(0,5));
+
+    if (data.success) {
+      const items = Array.isArray(data.menuItems) ? data.menuItems : [];
+
+      const categoriesWithCounts = (data.categories || []).map((cat: any) => ({
+        ...cat,
+        count: items.filter((item: any) => item.category_id === cat.id).length
+      }));
+      setCategories(categoriesWithCounts);
+
+      const now = Date.now();
+      const NEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+      const enriched = items.map((it: any) => {
+        const meta = deriveFlagsForItem(it, now, NEW_THRESHOLD_MS);
+        return { ...it, __meta: meta };
       });
 
-      const data = await response.json();
-      if (data.success) {
-        const categoriesWithCounts = data.categories.map((cat: any) => ({
-          ...cat,
-          count: data.menuItems.filter((item: any) => item.category_id === cat.id).length
-        }));
-        setCategories(categoriesWithCounts);
-        setFeaturedItems(data.menuItems.slice(0, 3));
-        setMenuItems(data.menuItems);
+// Robust comparator: priority (new/edited) first, then lastChanged desc (newest first)
+enriched.sort((a: any, b: any) => {
+  const A = a.__meta ?? {};
+  const B = b.__meta ?? {};
 
-        // cache full menu for price lookup across pages & for search
-        try {
-          localStorage.setItem('menuItems', JSON.stringify(data.menuItems));
-        } catch (e) {
-          console.warn('Unable to cache menu items', e);
-        }
+  const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+  const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+  if (aPriority !== bPriority) return bPriority - aPriority; // higher priority first
+
+  // numeric compare of lastChanged (descending -> newest first)
+  const aLast = Number(A.lastChanged || 0);
+  const bLast = Number(B.lastChanged || 0);
+  if (bLast !== aLast) return bLast - aLast;
+
+  // fallback to created timestamp (descending)
+  const aCreated = Number(A.created || 0);
+  const bCreated = Number(B.created || 0);
+  if (bCreated !== aCreated) return bCreated - aCreated;
+
+  // final deterministic fallback: id descending (so higher id (newer) comes first)
+  // if your ids are numeric use numeric compare:
+  const aIdNum = Number(a.id);
+  const bIdNum = Number(b.id);
+  if (!Number.isNaN(aIdNum) && !Number.isNaN(bIdNum)) {
+    return bIdNum - aIdNum;
+  }
+  // otherwise string locale compare (ascending), but invert to get newest first
+  return String(b.id || '').localeCompare(String(a.id || ''));
+});
+
+
+
+
+
+setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
+
+      
+      
+      
+      
+      
+      setMenuItems(enriched.map((i: any) => i));
+
+      try {
+        localStorage.setItem('menuItems', JSON.stringify(enriched));
+      } catch (e) {
+        console.warn('Unable to cache menu items', e);
       }
-    } catch (error) {
-      console.error('Error loading menu data from database:', error);
+    } else {
+      console.warn('admin-menu-service returned success=false', data);
     }
+  } catch (error) {
+    console.error('Error loading menu data from database:', error);
+  } finally {
     setLoading(false);
-  };
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
 
   const loadReviews = async () => {
     try {
@@ -486,7 +688,7 @@ const categoryIconMap = useMemo(() => {
         <div className="container mx-auto px-4 text-center">
           <h1 className="text-5xl md:text-6xl font-bold mb-6">Authentic Newari Cuisine</h1>
           <p className="text-xl md:text-2xl mb-8 max-w-2xl mx-auto">
-  Experience traditional flavors at {restaurant_info?.name ?? 'Our Restaurant'} in the heart of Pokhara
+  Experience traditional flavors at {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'} in the heart of Pokhara
 </p>
 
 
@@ -604,43 +806,41 @@ const categoryIconMap = useMemo(() => {
       </div>
     ) : (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-        {categories.map((category: any, index: number) => {
-          const src = categoryIconMap?.[category.id] ?? null;
+        {[...categories]
+          .sort((a: any, b: any) => a.name.localeCompare(b.name))
+          .map((category: any, index: number) => {
+            const src = categoryIconMap?.[category.id] ?? null;
 
-          return (
-            <Link
-              key={category.id ?? index}
-              href={`/menu?category=${encodeURIComponent(category.slug || category.id)}`}
-              className="block group"
-            >
-              <div className="relative w-full h-40 sm:h-48 lg:h-56 rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
-                {src ? (
-                  <img
-                    src={src}
-                    alt={category.name}
-                    loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
-                    <i className="ri-restaurant-line text-4xl text-gray-400"></i>
+            return (
+              <Link
+                key={category.id ?? index}
+                href={`/menu?category=${encodeURIComponent(category.slug || category.id)}`}
+                className="block group"
+              >
+                <div className="relative w-full h-40 sm:h-48 lg:h-56 rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
+                  {src ? (
+                    <img
+                      src={src}
+                      alt={category.name}
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
+                      <i className="ri-restaurant-line text-4xl text-gray-400"></i>
+                    </div>
+                  )}
+
+                  {/* Overlay for name */}
+                  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors"></div>
+                  <div className="absolute bottom-3 left-3 right-3 text-white font-semibold text-lg sm:text-xl">
+                    {category.name}
                   </div>
-                )}
-
-                {/* Overlay for name */}
-                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors"></div>
-                <div className="absolute bottom-3 left-3 right-3 text-white font-semibold text-lg sm:text-xl">
-                  {category.name}
                 </div>
-              </div>
-            </Link>
-          );
-        })}
-      
-
+              </Link>
+            );
+          })}
       </div>
-
-
     )}
   </div>
 </section>
@@ -658,99 +858,156 @@ const categoryIconMap = useMemo(() => {
 
 
 
+{/* Featured Items */}
+<section className="py-16 bg-gray-50">
+  <div className="container mx-auto px-4">
+    <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">
+      Featured Dishes
+    </h2>
 
-      {/* Featured Items */}
-      <section className="py-16 bg-gray-50">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Featured Dishes</h2>
+    {loading ? (
+      // Skeleton cards for featured items
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
+      </div>
+    ) : featuredItems.length === 0 ? (
+      <div className="text-center py-16">
+        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i className="ri-restaurant-line text-2xl text-gray-400"></i>
+        </div>
+        <h3 className="text-xl font-semibold text-gray-600 mb-2">
+          No Menu Items Yet
+        </h3>
+        <p className="text-gray-500 mb-6">
+          Featured dishes will appear here once the owner adds menu items
+        </p>
+        <Link
+          href="/menu"
+          className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap"
+        >
+          View Menu
+        </Link>
+      </div>
+    ) : (
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
+        {[...featuredItems]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((item) => {
+            const meta = item.__meta || {};
+            const isNew = !!meta.isNew;
+            const isEdited = !!meta.isEdited;
 
-          {loading ? (
-            // Skeleton cards for featured items
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
-            </div>
-          ) : featuredItems.length === 0 ? (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="ri-restaurant-line text-2xl text-gray-400"></i>
-              </div>
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">No Menu Items Yet</h3>
-              <p className="text-gray-500 mb-6">Featured dishes will appear here once the owner adds menu items</p>
-              <Link href="/menu" className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-                View Menu
-              </Link>
-            </div>
-          ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
-              {featuredItems.map((item) => (
-                <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="aspect-video relative">
-                    <img
-                      src={item.image_url || item.image}
-                      alt={item.name}
-                      loading="lazy"
-                      className="w-full h-full object-cover object-top"
-                    />
-                  </div>
+            return (
+              <div
+                key={item.id}
+                className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative"
+              >
+                <div className="aspect-video relative bg-gray-100 flex items-center justify-center">
+                  <img
+                    src={item.image_url || "/images/placeholder-food.png"}
+                    alt={item.name}
+                    className="max-h-full max-w-full object-contain object-center"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        "/images/placeholder-food.png";
+                    }}
+                  />
 
-                  <div className="p-6">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
-                      <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
-                    </div>
-
-                    <p className="text-gray-600 mb-4">{item.description}</p>
-
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-                        {item.category?.name || item.category}
+                  {/* Badges in top-left */}
+                  <div className="absolute top-3 left-3 flex gap-2">
+                    {isNew && (
+                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">
+                        NEW
                       </span>
-
-                      {cartItems[item.id] ? (
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => {
-                              const newQty = Math.max(0, (cartItems[item.id] || 0) - 1);
-                              updateQuantity(item.id, newQty);
-                            }}
-                            className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
-                          >
-                            <i className="ri-subtract-line"></i>
-                          </button>
-
-                          <span className="font-semibold text-lg">{cartItems[item.id]}</span>
-
-                          <button
-                            onClick={() => addToCart(item.id, 1)}
-                            className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
-                          >
-                            <i className="ri-add-line"></i>
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => addToCart(item.id, 1)}
-                          className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          Add to Cart
-                        </button>
-                      )}
-                    </div>
+                    )}
+                    {isEdited && (
+                      <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">
+                        EDITED
+                      </span>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
 
-          <div className="text-center mt-12">
-            <Link href="/menu" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-              View Full Menu
-            </Link>
-          </div>
-        </div>
-      </section>
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="text-xl font-bold text-gray-800">
+                      {item.name}
+                    </h3>
+                    <span className="text-xl font-bold text-orange-600">
+                      ₨{item.price}
+                    </span>
+                  </div>
+
+                  <p className="text-gray-600 mb-4">{item.description}</p>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                      {item.category?.name || item.category}
+                    </span>
+
+                    {cartItems[item.id] ? (
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => {
+                            const newQty = Math.max(
+                              0,
+                              (cartItems[item.id] || 0) - 1
+                            );
+                            updateQuantity(item.id, newQty);
+                          }}
+                          className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
+                        >
+                          <i className="ri-subtract-line"></i>
+                        </button>
+
+                        <span className="font-semibold text-lg">
+                          {cartItems[item.id]}
+                        </span>
+
+                        <button
+                          onClick={() => addToCart(item.id, 1)}
+                          className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
+                        >
+                          <i className="ri-add-line"></i>
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => addToCart(item.id, 1)}
+                        className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Add to Cart
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+      </div>
+    )}
+
+    <div className="text-center mt-12">
+      <Link
+        href="/menu"
+        className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap"
+      >
+        View Full Menu
+      </Link>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+
+
 
       {/* Customer Reviews Section */}
 {/* Customer Reviews Section */}
@@ -947,7 +1204,7 @@ const categoryIconMap = useMemo(() => {
                 <div className="flex items-start space-x-3">
                   <i className="ri-restaurant-line text-xl text-orange-600 mt-1"></i>
                   <div>
-                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Our Restaurant'}</p>
+                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</p>
                     <p className="text-gray-600">Authentic Newari cuisine in Pokhara</p>
                   </div>
                 </div>
@@ -1034,7 +1291,7 @@ const categoryIconMap = useMemo(() => {
                 <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
                   <i className="ri-restaurant-line text-white text-lg"></i>
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400">Newari Bhatti & Kathmandu Momo Ghar</span>
+                <span className="font-['Pacifico'] text-xl text-orange-400"> {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</span>
               </div>
               <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
             </div>
@@ -1086,19 +1343,86 @@ const categoryIconMap = useMemo(() => {
             </div>
             <div>
               <h4 className="text-lg font-semibold mb-4">Follow Us</h4>
-              <div className="flex space-x-4">
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-facebook-fill text-white"></i>
-                </a>
-                <a href="#" className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer">
-                  <i className="ri-instagram-line text-white"></i>
-                </a>
-              </div>
+             
+
+
+
+
+
+
+<div className="flex space-x-4">
+  {/* Facebook */}
+  {normalizeUrl(restaurant_info?.facebook_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.facebook_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Facebook"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-facebook-fill text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="Facebook not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-facebook-fill"></i>
+    </span>
+  )}
+
+  {/* Instagram */}
+  {normalizeUrl(restaurant_info?.instagram_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.instagram_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Instagram"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-instagram-line text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="Instagram not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-instagram-line"></i>
+    </span>
+  )}
+
+  {/* TikTok */}
+  {normalizeUrl(restaurant_info?.tiktok_url) ? (
+    <a
+      href={normalizeUrl(restaurant_info?.tiktok_url)!}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="TikTok"
+      className="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center hover:bg-orange-700"
+    >
+      <i className="ri-tiktok-line text-white"></i>
+    </a>
+  ) : (
+    <span
+      title="TikTok not set"
+      className="w-10 h-10 bg-gray-600/30 rounded-full flex items-center justify-center text-white opacity-60"
+      aria-hidden
+    >
+      <i className="ri-tiktok-line"></i>
+    </span>
+  )}
+</div>
+
+
+
+
             </div>
           </div>
 
 <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-  <p>&copy; 2024 {restaurant_info?.name ?? 'Our Restaurant'}. All rights reserved.</p>
+  <p>&copy; 2024 {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}. All rights reserved.</p>
 </div>
         </div>
       </footer>

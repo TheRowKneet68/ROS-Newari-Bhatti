@@ -12,7 +12,6 @@ import { useRef } from 'react';
 
 
 
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -34,9 +33,26 @@ export default function DashboardPage() {
 
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
 
+  const [error, setError] = useState<string | null>(null);
+
+// default true to keep original quality unless user chooses compression
+const [preserveQuality, setPreserveQuality] = useState<boolean>(true);
+
+const [showOnlyFeatured, setShowOnlyFeatured] = useState<boolean>(false);
   const lastOrderCountRef = useRef<number | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
   const lastCancelledCountRef = useRef<number | null>(null);
+
+const [catSearchTerm, setCatSearchTerm] = useState('');
+const [catSearchScope, setCatSearchScope] = useState<'all'|'name'|'description'|'items'>('all');
+
+
+
+
+const [searchScope, setSearchScope] = useState<'all'|'name'|'category'>('all');
+
+
+
 
   // audio refs for beep
 
@@ -70,7 +86,7 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [showOwnerPanel, setShowOwnerPanel] = useState(false);
   const [showRestaurantInfoModal, setShowRestaurantInfoModal] = useState(false);
-  const [showAdminModal, setShowAdminModal] = useState(false);
+
   const [reviews, setReviews] = useState<any[]>([]);
   const [admins, setAdmins] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -81,7 +97,20 @@ export default function DashboardPage() {
   const [showEditItemModal, setShowEditItemModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+
+
+
+
+// Admin management state & UI flags
+const [loadingAdmins, setLoadingAdmins] = useState<boolean>(true);
+const [operationError, setOperationError] = useState<string | null>(null);
+const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+const [editingAdmin, setEditingAdmin] = useState<any | null>(null);
+
+
+
+
 
 
 // image upload states
@@ -97,7 +126,7 @@ const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
 
 
 const [restaurantInfo, setRestaurantInfo] = useState({
-  name: 'Newari Bhatti and Kathmandu Momo Ghar',
+  name: 'Newari Bhatti and Kathmandu Momo House',
   phone: '+977-9829117277',
   email: 'info@newaribhatti.com',
   address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
@@ -126,6 +155,45 @@ const makeFilename = (originalName: string) => {
   const name = originalName.replace(/\.[^/.]+$/, '');
   return `${name}_${Date.now()}.${ext}`;
 };
+
+
+
+
+// helpers to edit / delete social links in restaurantInfo
+const handleEditSocial = (field: 'facebook_url' | 'instagram_url' | 'tiktok_url') => {
+  // simply open the modal — the modal form will show current values
+  setShowRestaurantInfoModal(true);
+  // optional: scroll modal into view if needed
+  setTimeout(() => {
+    const el = document.querySelector('#restaurant-info-modal');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50);
+};
+
+const handleDeleteSocial = async (field: 'facebook_url' | 'instagram_url' | 'tiktok_url') => {
+  if (!restaurantInfo?.id) {
+    alert('No restaurant record to update.');
+    return;
+  }
+  if (!confirm('Are you sure you want to remove this link?')) return;
+
+  // build updates object with the field set to null (or '' if you prefer)
+  const updates: any = { id: restaurantInfo.id };
+  updates[field] = null; // server will set NULL; if your API expects empty string, change to ''
+
+  const ok = await updateRestaurantInfo(updates);
+  if (!ok) {
+    // updateRestaurantInfo already shows toasts on failure
+    return;
+  }
+  showSuccessToast?.('Link removed');
+};
+
+
+
+
+
+
 
 
 
@@ -195,10 +263,17 @@ const loadUserQuestions = async () => {
   }
 };
 
+// whenever editingAdmin changes or modal opens, populate (or clear) the form
 useEffect(() => {
   loadUserQuestions();
+  (async () => {
+    try {
+      await fetchAdmins();
+    } catch (err) {
+      console.error("useEffect fetchAdmins failed:", err);
+    }
+  })();
 }, []);
-
 
 
 
@@ -262,37 +337,52 @@ const replyToQuestion = async (id: number, answerText: string) => {
 
 
 
-  const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
-    console.log('[handleFileInputChange] called');
-    const file = e.target.files?.[0] ?? null;
-    if (!file) {
-      setPickedFile(null);
-      setPreviewUrl(null);
-      return;
-    }
-    setPickedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setUploadError(null);
-    setUploadedImageUrl(null);
+const handleFileInputChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+  console.log('[handleFileInputChange] called');
+  const file = e.target.files?.[0] ?? null;
+  if (!file) {
+    setPickedFile(null);
+    setPreviewUrl(null);
+    return;
+  }
+  setPickedFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setUploadError(null);
+  setUploadedImageUrl(null);
 
-    try {
-      setUploading(true);
-      const compressed = await compressImageFile(file, 0.45, 1400).catch(() => file as any);
-      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+  try {
+    setUploading(true);
+
+    // If preserveQuality, upload raw file (fast + no quality loss)
+    if (preserveQuality) {
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, file, 'menu-item');
       if (!res.success) {
         console.error('[auto upload] failed', res.error);
         setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
         return;
       }
       setUploadedImageUrl(res.publicUrl || null);
-      console.log('[auto upload] done', res);
-    } catch (err) {
-      console.error('[auto upload] exception', err);
-      setUploadError((err as any)?.message ?? 'Upload exception');
-    } finally {
-      setUploading(false);
+      console.log('[auto upload - raw file] done', res);
+      return;
     }
-  };
+
+    // Otherwise compress (but our compressImageFile now uses higher defaults)
+    const compressed = await compressImageFile(file, 0.9, 2000, { preserveQuality: false }).catch(() => file as any);
+    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+    if (!res.success) {
+      console.error('[auto upload] failed', res.error);
+      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+      return;
+    }
+    setUploadedImageUrl(res.publicUrl || null);
+    console.log('[auto upload] done', res);
+  } catch (err) {
+    console.error('[auto upload] exception', err);
+    setUploadError((err as any)?.message ?? 'Upload exception');
+  } finally {
+    setUploading(false);
+  }
+};
 
 
 
@@ -323,11 +413,34 @@ const handleFileSelectFromFile = (f?: File | null) => {
 };
 
 
-// 1) compressImageFile - single, robust implementation
-async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): Promise<Blob> {
+// new compressImageFile: can optionally skip compression or keep lossless PNG
+async function compressImageFile(
+  file: File,
+  quality = 0.9,        // default higher quality if you do compress
+  maxWidth = 2000,      // larger max width to avoid downsizing unless needed
+  options: { preserveQuality?: boolean } = {}
+): Promise<Blob | File> {
   if (typeof window === 'undefined') return file;
   if (!file || !file.type?.startsWith?.('image/')) return file;
 
+  const { preserveQuality = true } = options;
+
+  // helper: decide whether to skip compression for this file
+  const shouldSkipCompression = (f: File) => {
+    // skip compression for PNG to preserve transparency or when preserveQuality requested
+    if (preserveQuality) return true;
+    const isPng = f.type === 'image/png';
+    // skip if file size is already small (< 200 KB) - you can adjust threshold
+    const smallFile = f.size <= 200 * 1024;
+    return isPng || smallFile;
+  };
+
+  if (shouldSkipCompression(file)) {
+    // return original File to preserve quality
+    return file;
+  }
+
+  // otherwise do canvas resize + encode (JPEG)
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const image = new Image();
@@ -336,6 +449,7 @@ async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): P
     image.src = url;
   });
 
+  // compute new size while preserving aspect
   const ratio = Math.min(1, maxWidth / img.width);
   const width = Math.round(img.width * ratio);
   const height = Math.round(img.height * ratio);
@@ -345,16 +459,21 @@ async function compressImageFile(file: File, quality = 0.45, maxWidth = 1400): P
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas not supported');
-
   ctx.drawImage(img, 0, 0, width, height);
 
+  // For best quality: use original file type when possible (but keep PNG lossless)
+  const isOrigPNG = file.type === 'image/png';
+  const mime = isOrigPNG ? 'image/png' : 'image/jpeg';
+
   return await new Promise<Blob>((resolve, reject) => {
+    // For PNG the quality argument is ignored (PNG is lossless)
     canvas.toBlob((blob) => {
       if (!blob) return reject(new Error('Canvas toBlob returned null'));
       resolve(blob);
-    }, 'image/jpeg', quality);
+    }, mime, Math.max(0.8, quality)); // keep high quality
   });
 }
+
 
 
 
@@ -380,47 +499,43 @@ const handleFileSelect = (f?: File | null) => {
 
 
 
-  async function uploadCompressedImageToSupabaseSafe(
-    supClient: ReturnType<typeof createClient>,
-    bucket: string,
-    blob: Blob,
-    prefix = 'img'
-  ): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
-    console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blob.size });
-    if (!supClient) return { success: false, error: 'Supabase client missing' };
-    if (!bucket) return { success: false, error: 'Bucket name missing' };
+async function uploadCompressedImageToSupabaseSafe(
+  supClient: ReturnType<typeof createClient>,
+  bucket: string,
+  blobOrFile: Blob | File,
+  prefix = 'img'
+): Promise<{ success: boolean; publicUrl?: string | null; path?: string | null; error?: any }> {
+  console.log('[uploadCompressedImageToSupabaseSafe] start', { bucket, prefix, blobSize: blobOrFile.size });
+  if (!supClient) return { success: false, error: 'Supabase client missing' };
+  if (!bucket) return { success: false, error: 'Bucket name missing' };
 
-    try {
-      const filename = `${prefix}-${makeFilename('upload')}`;
-      const uploadBlob = blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' });
+  try {
+    const filename = `${prefix}-${makeFilename('upload')}`;
+    // ensure uploadBlob has a type: preserve original type when possible
+    const uploadBlob = blobOrFile instanceof Blob ? blobOrFile : new Blob([blobOrFile], { type: blobOrFile.type || 'image/jpeg' });
+    const contentType = (uploadBlob as any).type || 'image/jpeg';
 
-      const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
-        contentType: 'image/jpeg',
-        cacheControl: '3600',
-        upsert: false,
-      });
+    const { data, error } = await supClient.storage.from(bucket).upload(filename, uploadBlob, {
+      contentType,
+      cacheControl: '3600',
+      upsert: false,
+    });
 
-      if (error) {
-        console.log('[Supabase upload] error', error);
-        return { success: false, error };
-      }
-      console.log('[Supabase upload] success', data);
-
-      const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
-      if (urlResult?.error) {
-        console.warn('[Supabase getPublicUrl] error', urlResult.error);
-        return { success: true, publicUrl: null, path: data.path };
-      }
-
-      const publicUrl = urlResult?.data?.publicUrl ?? null;
-      console.log('[Supabase publicUrl]', publicUrl);
-
-      return { success: true, publicUrl, path: data.path };
-    } catch (err) {
-      console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
-      return { success: false, error: err };
+    if (error) {
+      console.log('[Supabase upload] error', error);
+      return { success: false, error };
     }
+    console.log('[Supabase upload] success', data);
+
+    const urlResult: any = await supClient.storage.from(bucket).getPublicUrl(data.path);
+    const publicUrl = urlResult?.data?.publicUrl ?? null;
+    return { success: true, publicUrl, path: data.path };
+  } catch (err) {
+    console.log('[uploadCompressedImageToSupabaseSafe] exception', err);
+    return { success: false, error: err };
   }
+}
+
 
 
 
@@ -456,26 +571,39 @@ const handleFileSelect = (f?: File | null) => {
 
 
 
-  const handleUpload = async () => {
-    if (!pickedFile) return setUploadError('Select a file first');
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const compressed = await compressImageFile(pickedFile, 0.35, 1200).catch(() => pickedFile as any);
-      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+const handleUpload = async () => {
+  if (!pickedFile) return setUploadError('Select a file first');
+  setUploading(true);
+  setUploadError(null);
+  try {
+    if (preserveQuality) {
+      // upload original file bytes to preserve everything
+      const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, pickedFile, 'menu-item');
       if (!res.success) {
         console.error('[handleUpload] upload failed', res.error);
         setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
         return;
       }
       setUploadedImageUrl(res.publicUrl || null);
-    } catch (err) {
-      console.error('[handleUpload] exception', err);
-      setUploadError((err as any)?.message ?? 'Upload exception');
-    } finally {
-      setUploading(false);
+      return;
     }
-  };
+
+    // compress with high quality defaults if user opted to compress
+    const compressed = await compressImageFile(pickedFile, 0.9, 2000, { preserveQuality: false }).catch(() => pickedFile as any);
+    const res = await uploadCompressedImageToSupabaseSafe(supabase, BUCKETNAME, compressed, 'menu-item');
+    if (!res.success) {
+      console.error('[handleUpload] upload failed', res.error);
+      setUploadError(res.error?.message ?? JSON.stringify(res.error) ?? 'Upload failed');
+      return;
+    }
+    setUploadedImageUrl(res.publicUrl || null);
+  } catch (err) {
+    console.error('[handleUpload] exception', err);
+    setUploadError((err as any)?.message ?? 'Upload exception');
+  } finally {
+    setUploading(false);
+  }
+};
 
 
 
@@ -1053,48 +1181,169 @@ try {
 
 
 
-  const loadMenuData = async () => {
-    try {
-      console.log('Loading menu data from database...');
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({
-          action: 'getMenuData'
-        })
-      });
+ const loadMenuData = async () => {
+  setLoading(true);
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({ action: 'getMenuData' })
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Menu data response:', data);
-      
-      if (data.success) {
-        console.log('Categories loaded:', data.categories?.length || 0);
-        console.log('Menu items loaded:', data.menuItems?.length || 0);
-        
-        setCategories(data.categories || []);
-        setMenuItems(data.menuItems || []);
-      } else {
-        console.log('Failed to load menu data:', data.error);
-        // Keep empty state on error
-        setCategories([]);
-        setMenuItems([]);
-      }
-    } catch (error) {
-      console.log('Error loading menu data from database:', error);
-      // Keep empty state on error
-      setCategories([]);
-      setMenuItems([]);
+    // network-level check
+    if (!response.ok) {
+      console.error('admin-menu-service HTTP error', response.status, await response.text());
+      // attempt to use cached menu if available
+      const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+      setCategories([{ id: 'all', name: 'All Items' }]);
+      setMenuItems(Array.isArray(cached) ? cached : []);
+      //setFeaturedItems(Array.isArray(cached) ? cached.slice(0,3) : []);
+      return;
     }
-  };
 
+    const data = await response.json();
+    console.debug('admin-menu-service raw response:', data);
+
+    // Try multiple places where the items array might exist
+    let items: any[] | null = null;
+    const possiblePaths = [
+      data?.menuItems,
+      data?.menu_items,
+      data?.items,
+      data?.payload?.menuItems,
+      data?.payload?.menu_items,
+      data?.payload?.items
+    ];
+    for (const p of possiblePaths) {
+      if (Array.isArray(p)) { items = p; break; }
+    }
+
+    // Also derive categories from common places
+    let cats: any[] = [];
+    if (Array.isArray(data?.categories)) cats = data.categories;
+    else if (Array.isArray(data?.menu_categories)) cats = data.menu_categories;
+    else if (Array.isArray(data?.payload?.categories)) cats = data.payload.categories;
+
+    // If items still not found, try cached localStorage
+    if (!items) {
+      console.warn('No items array found in response; attempting fallback to localStorage. Response keys:', Object.keys(data || {}));
+      const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+      if (Array.isArray(cached) && cached.length) {
+        items = cached;
+        console.info('Using cached menuItems from localStorage (length=' + cached.length + ')');
+      } else {
+        // final fallback: if server returned something that looks like a wrapper object with keys, try to find an array value
+        const firstArray = Object.values(data || {}).find((v: any) => Array.isArray(v));
+        if (Array.isArray(firstArray)) {
+          items = firstArray;
+          console.info('Found items in first array-valued key of response');
+        }
+      }
+    }
+
+    // Ensure items is at least an empty array so UI will render the "no items" safely
+    if (!Array.isArray(items)) items = [];
+
+    // parse times helper (keeps safe for various formats)
+    const parseTimeSafe = (v: any): number => {
+      if (!v && v !== 0) return 0;
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const asNum = Number(v);
+        if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+        const asDate = Date.parse(v);
+        if (!Number.isNaN(asDate)) return asDate;
+        return 0;
+      }
+      try {
+        const cast = new Date(v as any).getTime();
+        return Number.isNaN(cast) ? 0 : cast;
+      } catch {
+        return 0;
+      }
+    };
+
+    // derive meta (created, updated, lastChanged, isNew, isEdited)
+    const deriveMeta = (it: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+      const createdRaw = it.created_at ?? it.createdAt ?? it.created ?? null;
+      const updatedRaw = it.updated_at ?? it.updatedAt ?? it.updated ?? null;
+      const created = parseTimeSafe(createdRaw);
+      const updated = parseTimeSafe(updatedRaw);
+      const lastChanged = Math.max(created || 0, updated || 0);
+      const isEdited = (updated > 0 && created > 0 && updated !== created);
+      const isNew = (created > 0 && (now - created) <= newThresholdMs);
+      return { created, updated, lastChanged, isEdited, isNew };
+    };
+
+    // Enrich items
+    const now = Date.now();
+    const enriched = items.map((it: any) => ({ ...it, __meta: deriveMeta(it, now) }));
+
+    // Sort: new/edited first, then lastChanged desc (newest first), then created desc, then id desc
+    enriched.sort((a: any, b: any) => {
+      const A = a.__meta ?? {};
+      const B = b.__meta ?? {};
+      const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+      const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+      if (aPriority !== bPriority) return bPriority - aPriority;
+      const aLast = Number(A.lastChanged || 0);
+      const bLast = Number(B.lastChanged || 0);
+      if (bLast !== aLast) return bLast - aLast;
+      const aCreated = Number(A.created || 0);
+      const bCreated = Number(B.created || 0);
+      if (bCreated !== aCreated) return bCreated - aCreated;
+      const aId = Number(a.id);
+      const bId = Number(b.id);
+      if (!Number.isNaN(aId) && !Number.isNaN(bId)) return bId - aId;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+    // Categories: ensure at least 'all'
+    const allCategory = { id: 'all', name: 'All Items' };
+    const categoriesWithCounts = [allCategory, ...(Array.isArray(cats) ? cats : [])].map((cat: any) => ({
+      ...cat,
+      count: enriched.filter((it: any) => String(it.category_id ?? it.category?.id ?? '') === String(cat.id)).length
+    }));
+
+    // set state & cache
+    setCategories(categoriesWithCounts);
+    setMenuItems(enriched);
+    //setFeaturedItems(enriched.slice(0, 3));
+    try { localStorage.setItem('menuItems', JSON.stringify(enriched)); } catch {}
+
+    // debug print top items
+    console.debug('sorted enriched sample (top 8):', enriched.slice(0,8).map((x:any)=>({
+      id: x.id, name: x.name, created: x.__meta?.created, updated: x.__meta?.updated, lastChanged: x.__meta?.lastChanged, isNew: x.__meta?.isNew, isEdited: x.__meta?.isEdited
+    })));
+  } catch (err) {
+    console.error('Error in loadMenuData fallback loader:', err);
+    // use cached menu if available
+    const cached = JSON.parse(localStorage.getItem('menuItems') || 'null');
+    setCategories([{ id: 'all', name: 'All Items' }]);
+    setMenuItems(Array.isArray(cached) ? cached : []);
+    //setFeaturedItems(Array.isArray(cached) ? cached.slice(0,3) : []);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
   const loadReviews = async () => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/review-service`, {
@@ -1158,10 +1407,42 @@ const loadRestaurantInfo = async () => {
   }
 };
 
-  const loadAdmins = () => {
-    const savedAdmins = JSON.parse(localStorage.getItem('adminUsers') || '[]');
-    setAdmins(savedAdmins);
-  };
+
+
+
+
+
+// Load admins from server-side API (returns users with role/admin user_type)
+const loadAdmins = async () => {
+  try {
+    // Defensive fetch: server should return { success: true, admins: [...] }
+    const res = await fetch('/api/admins/list', { method: 'GET', headers: { 'Content-Type': 'application/json' }});
+    const text = await res.text().catch(() => '');
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok) {
+      console.warn('loadAdmins: server returned non-OK', res.status, payload);
+      // if API returns admins under different shape, try to handle common ones
+      if (payload?.admins) { setAdmins(payload.admins); return; }
+      setAdmins([]);
+      return;
+    }
+
+    // expected shape: { success: true, admins: [...] } or { admins: [...] }
+    const adminsList = Array.isArray(payload?.admins) ? payload.admins : (Array.isArray(payload) ? payload : []);
+    setAdmins(adminsList);
+  } catch (err) {
+    console.error('loadAdmins error:', err);
+    setAdmins([]);
+  }
+};
+
+
+
+
+
+
 
   const showSuccessToast = (message: string) => {
     const successToast = document.createElement('div');
@@ -1430,87 +1711,86 @@ const handleEditMenuItem = async (itemData: any) => {
     setLoading(false);
   };
 
-// Replace your existing updateRestaurantInfo with this robust implementation
+
+  
+
+
+
+
+
+
+
+
+// replace the old updateRestaurantInfo with this function (paste entire function)
 const updateRestaurantInfo = async (info: any) => {
-  // local saving state (avoid clobbering other global loading)
   try {
-    // optional: if you maintain a saving state hook in file, use it instead
+    // optional UI saving indicator (if you have setSaving)
     if (typeof setSaving === 'function') setSaving(true);
 
-    // normalize payload: remove undefined values
+    // Normalize payload: remove undefined keys
     const payload: Record<string, any> = {};
     Object.entries(info || {}).forEach(([k, v]) => {
       if (v !== undefined) payload[k] = v;
     });
 
-    // If there is an id provided, try upsert (so we update existing row).
-    // If id is undefined/null, insert a new row.
-    let resultData = null;
-    if (payload.id !== undefined && payload.id !== null && payload.id !== '') {
-      // ensure id type matches your DB pk type (int or uuid)
-      // If your id is serial/int but the incoming id is string, coerce:
-      // payload.id = Number(payload.id) // uncomment if needed
+    // Call server-side route that uses SUPABASE_SERVICE_ROLE_KEY to bypass RLS
+    // The server route will perform the upsert/update/insert safely.
+    const res = await fetch('/api/restaurant/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: payload.id ?? null,
+        updates: payload
+      })
+    });
 
-      const { data, error } = await supabase
-        .from('restaurant_info')
-        .upsert(payload, { onConflict: 'id', returning: 'representation' });
+    const txt = await res.text().catch(() => '');
+    let body: any = null;
+    try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = { raw: txt }; }
 
-      if (error) {
-        console.error('Supabase upsert error (updateRestaurantInfo):', error);
-        // Common error: "new row violates row-level security policy" => RLS problem
-        // Show helpful message for debugging:
-        alert(`Save failed: ${error.message || JSON.stringify(error)}`);
-        return false;
-      }
-
-      resultData = Array.isArray(data) ? data[0] : data;
-    } else {
-      // Insert new row (no id provided)
-      const { data, error } = await supabase
-        .from('restaurant_info')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Supabase insert error (updateRestaurantInfo):', error);
-        alert(`Insert failed: ${error.message || JSON.stringify(error)}`);
-        return false;
-      }
-
-      resultData = data;
+    if (!res.ok || body?.success === false) {
+      console.error('Server returned error for /api/restaurant/update:', res.status, body);
+      const msg = body?.error || body?.message || `Save failed (status ${res.status})`;
+      // show error to user
+      if (typeof showErrorToast === 'function') showErrorToast(msg);
+      else alert(msg);
+      return false;
     }
 
-    // Update React state (replace variable names below if you use different names)
+    // success — server returns the updated restaurant row under body.restaurant (or body.data)
+    const updated = body?.restaurant ?? body?.data ?? body?.result ?? null;
+
+    // Update UI state
     if (typeof setRestaurantInfo === 'function') {
-      setRestaurantInfo(resultData);
-      try {
-  await loadRestaurantInfo();
-} catch (e) {
-  console.warn('loadRestaurantInfo after save failed', e);
-}
-    } else {
-      console.warn('setRestaurantInfo not found; update aborted for UI state');
+      setRestaurantInfo(updated);
+      try { await loadRestaurantInfo(); } catch (e) { console.warn('loadRestaurantInfo after save failed', e); }
     }
 
-    // optional cache to localStorage
-    try {
-      localStorage.setItem('restaurantInfo', JSON.stringify(resultData));
-    } catch (e) { /* ignore */ }
+    try { localStorage.setItem('restaurantInfo', JSON.stringify(updated)); } catch (e) {}
 
-    // success feedback (if you have UI to show)
     if (typeof showSuccessToast === 'function') showSuccessToast('Restaurant info saved');
-    else console.info('Restaurant info saved', resultData);
+    else console.info('Restaurant info saved', updated);
 
     return true;
   } catch (err: any) {
-    console.error('Unexpected error in updateRestaurantInfo:', err);
-    alert('Unexpected error while saving. See console for details.');
+    console.error('Unexpected error in updateRestaurantInfo (client):', err);
+    if (typeof showErrorToast === 'function') showErrorToast('Unexpected error while saving. See console.');
+    else alert('Unexpected error while saving. See console.');
     return false;
   } finally {
     if (typeof setSaving === 'function') setSaving(false);
   }
 };
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1604,27 +1884,240 @@ const deleteReview = async (reviewId: number) => {
 
 
 
-
-  const addAdmin = (adminData: any) => {
-    const newAdmin = {
-      id: Date.now(),
-      ...adminData,
-      role: 'admin',
-      addedBy: userType,
-      addedDate: new Date().toISOString()
+// Add a new admin (calls server-side API)
+const addAdmin = async (adminData: { first_name?: string; last_name?: string; name?: string; email: string; password?: string; phone?: string; role?: string }) => {
+  try {
+    setLoading(true);
+    // prepare payload: support both name and first/last split
+    const payload: any = {
+      email: adminData.email,
+      password: adminData.password || (Math.random().toString(36).slice(2, 10) + 'A1!'),
+      first_name: adminData.first_name ?? (adminData.name ? adminData.name.split(' ')[0] : null),
+      last_name: adminData.last_name ?? (adminData.name ? adminData.name.split(' ').slice(1).join(' ') : null),
+      phone: adminData.phone ?? null,
+      role: adminData.role ?? 'admin',
+      user_type: 'admin'
     };
-    const updatedAdmins = [...admins, newAdmin];
-    setAdmins(updatedAdmins);
-    localStorage.setItem('adminUsers', JSON.stringify(updatedAdmins));
-  };
 
-  const removeAdmin = (adminId: number) => {
-    if (confirm('Are you sure you want to remove this admin?')) {
-      const updatedAdmins = admins.filter(admin => admin.id !== adminId);
-      setAdmins(updatedAdmins);
-      localStorage.setItem('adminUsers', JSON.stringify(updatedAdmins));
+    const res = await fetch('/api/admins/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text().catch(() => '');
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+
+    if (!res.ok || !data || data.success === false) {
+      console.error('Failed to add admin:', res.status, data);
+      showErrorToast('Failed to add admin: ' + (data?.error ?? 'Unknown error'));
+      return false;
     }
-  };
+
+    // refresh list
+    await loadAdmins();
+    showSuccessToast('Admin added successfully');
+    return true;
+  } catch (err) {
+    console.error('addAdmin error:', err);
+    showErrorToast('Error adding admin. See console.');
+    return false;
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
+
+
+
+
+
+const fetchAdmins = async () => {
+  setLoadingAdmins(true);
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/list", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const text = await res.text();
+    let payload: any = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch (e) {
+      console.warn("fetchAdmins: response was not valid JSON", text);
+      payload = null;
+    }
+
+    if (!res.ok) {
+      console.error("fetchAdmins non-OK", res.status, payload);
+      setAdmins([]);
+      return;
+    }
+
+    setAdmins(Array.isArray(payload?.admins) ? payload.admins : []);
+  } catch (err) {
+    console.error("fetchAdmins exception:", err);
+    setOperationError(err?.message ?? "Failed to load admins");
+    setAdmins([]);
+  } finally {
+    setLoadingAdmins(false);
+  }
+};
+
+
+
+
+
+// Remove admin (calls POST /api/admins/delete with { id })
+const removeAdmin = async (adminId: string) => {
+  if (!confirm("Remove this admin? This action cannot be undone.")) return;
+  setOperationError(null);
+  try {
+    const res = await fetch("/api/admins/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: adminId }),
+    });
+    const text = await res.text();
+    let payload: any = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = { raw: text }; }
+
+    if (!res.ok || payload?.success === false) {
+      console.error("removeAdmin failed:", res.status, payload);
+      setOperationError(payload?.error ?? `Failed to remove admin (${res.status})`);
+      // refresh anyway to avoid UI drift
+      await fetchAdmins();
+      return;
+    }
+
+    // optimistic update
+    setAdmins(prev => prev.filter(a => String(a.id) !== String(adminId)));
+    // ensure fresh
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("removeAdmin error:", err);
+    setOperationError(err?.message ?? "Failed to remove admin");
+    await fetchAdmins();
+  }
+};
+
+
+
+
+
+
+
+
+const handleAdminSave = async (payload: any) => {
+  setOperationError(null);
+  try {
+    // Ensure address is normalized...
+    if (!payload.address) {
+      const street = (payload.address_street ?? "").toString().trim();
+      const city = (payload.address_city ?? "").toString().trim();
+      const state = (payload.address_state ?? "").toString().trim();
+      const zip = (payload.address_zip_code ?? payload.address_zip ?? "").toString().trim();
+
+      if (street || city || state || zip) {
+        payload.address = { street: street || null, city: city || null, state: state || null, zip: zip || null };
+      } else {
+        payload.address = null;
+      }
+
+      delete payload.address_street;
+      delete payload.address_city;
+      delete payload.address_state;
+      delete payload.address_zip_code;
+    }
+
+    // 🔑 Add this block: enforce role based on current logged-in user
+    const currentUserType = localStorage.getItem("userType");
+    if (currentUserType === "superadmin") {
+      payload.role = "admin";
+      payload.user_type = "admin";
+    } else {
+      payload.role = "user";
+      payload.user_type = "user";
+    }
+
+    const url = payload.id ? "/api/admins/edit" : "/api/admins/add";
+    const method: "POST" | "PUT" = payload.id ? "PUT" : "POST";
+
+    console.debug("handleAdminSave outgoing payload:", JSON.stringify(payload));
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { throw new Error("Server returned non-JSON: " + (text?.slice(0,200) || "<empty>")); }
+
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+
+    showSuccessToast(payload.id ? "Admin updated" : "Admin added");
+    setShowAdminModal(false);
+    setEditingAdmin(null);
+    await fetchAdmins();
+  } catch (err: any) {
+    console.error("handleAdminSave error:", err);
+    const msg = err?.message ?? "Failed to save admin";
+    setOperationError(msg);
+    showErrorToast(msg);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   const toggleFeaturedReview = async (reviewId: number, currentFeatured: boolean) => {
     try {
@@ -1857,14 +2350,8 @@ const deleteReview = async (reviewId: number) => {
       case 'on-the-way': return 'bg-purple-400 text-purple-1200';
       case 'completed': return 'bg-green-400 text-green-1200';
       case 'cancelled': return 'bg-red-400 text-red-1200';
-
-
-
       case 'delivery': return 'bg-teal-400 text-teal-1200';
       case 'pickup': return 'bg-cyan-400 text-cyan-1200';
-
-
-
       default: return 'bg-blue-100 text-blue-800';
     }
   };
@@ -1989,6 +2476,11 @@ const deleteReview = async (reviewId: number) => {
             {/* Stats Cards */}
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white rounded-2xl shadow-lg p-6">
+                
+                
+                
+                
+                
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm">Total Orders</p>
@@ -2069,6 +2561,9 @@ const deleteReview = async (reviewId: number) => {
                 ) : (
                   recentOrders.map((order) => (
                     <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                     
+                     
+                     
                       <div className="flex-1">
                         <div className="flex items-center space-x-3">
                           <h3 className="font-semibold">Order #{order.id}</h3>
@@ -2080,7 +2575,12 @@ const deleteReview = async (reviewId: number) => {
                           {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
                         </span>
 
-
+  {/* NEW ORDER Badge */}
+  {order.status?.toLowerCase() === 'placed' && (
+    <span className="ml-2 px-3 py-1 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+      🚨 New Order
+    </span>
+  )}
 
                         </div>
                         <p className="text-sm text-gray-600">
@@ -2090,6 +2590,12 @@ const deleteReview = async (reviewId: number) => {
                           {new Date(order.created_at || Date.now()).toLocaleString()}
                         </p>
                       </div>
+
+
+
+
+
+                      
                       <button
                         onClick={() => handleViewOrder(order)}
                         className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
@@ -2269,12 +2775,16 @@ const deleteReview = async (reviewId: number) => {
                 filteredOrders.map((order) => (
                   <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <h3 className="font-semibold">Order #{order.id}</h3>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
-                          {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
-                        </span>
-
+                      
+                      
+                      
+                      
+                      
+<div className="flex items-center space-x-3 mb-2">
+  <h3 className="font-semibold">Order #{order.id}</h3>
+  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status || 'placed')}`}>
+    {(order.status || 'placed').charAt(0).toUpperCase() + (order.status || 'placed').slice(1)}
+  </span>
 
 
 
@@ -2287,7 +2797,12 @@ const deleteReview = async (reviewId: number) => {
   {(order?.order_type || 'pickup').toString().replace(/^\w/, (c: string) => c.toUpperCase())}
 </span>
 
-
+  {/* NEW ORDER Badge */}
+  {order.status?.toLowerCase() === 'placed' && (
+    <span className="ml-2 px-3 py-1 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+      🚨 New Order
+    </span>
+  )}
 
 
                       </div>
@@ -2332,99 +2847,231 @@ const deleteReview = async (reviewId: number) => {
                 ))
               )}
             </div>
+
+
+
+
+
+
           </div>
         )}
 
 
-        {/* Menu Items Tab */}
-        {activeTab === 'menu-items' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-2xl shadow-lg p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold">Menu Items</h2>
-                <button
-                  onClick={() => setShowAddItemModal(true)}
-                  className="bg-orange-600 text-white px-1 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  <i className="ri-add-line mr-2"></i>
-                  Add Menu Item
-                </button>
-              </div>
+ 
 
-              <div className="grid md:grid-cols-2 gap-6">
-                {menuItems.length === 0 ? (
-                  <div className="col-span-2 text-center py-8">
-                    <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <i className="ri-restaurant-line text-2xl text-gray-400"></i>
-                    </div>
-                    <p className="text-gray-500 mb-4">No menu items yet</p>
-                    <button
-                      onClick={() => setShowAddItemModal(true)}
-                      className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                    >
-                      Add First Item
-                    </button>
-                  </div>
-                ) : (
-                  menuItems.map((item) => (
-                    <div key={item.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center space-x-3">
-                          <img 
-                            src={item.image_url || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20traditional%20authentic%20restaurant%20quality%20presentation%20simple%22clean%20background&width=120&height=120&seq=menu-item&orientation=squarish'} 
-                            alt={item.name}
-                            className="w-16 h-16 object-cover rounded-lg"
-                          />
-                          <div>
-                            <h3 className="font-semibold">{item.name}</h3>
-                            <p className="text-sm text-gray-600 mb-1">{item.category?.name || 'No Category'}</p>
-                            <p className="text-lg font-bold text-orange-600">₨{item.price}</p>
-                          </div>
-                        </div>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          item.is_available 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {item.is_available ? 'Available' : 'Out of Stock'}
-                        </span>
-                      </div>
+{/* Menu Items Tab */}
 
-                      <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.description}</p>
+{/* Menu Items Tab */}
+{activeTab === 'menu-items' && (
+  <div className="space-y-6">
+    <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div>
+          <h2 className="text-xl font-semibold">Menu Items</h2>
+          <p className="text-sm text-gray-500">Manage your menu — search, feature, edit or remove items.</p>
+        </div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
 
-                      <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                        <span>{item.preparation_time || 15} min prep</span>
-                        {item.is_vegetarian && (
-                          <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                            Vegetarian
-                          </span>
-                        )}
-                      </div>
 
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedItem(item);
-                            setShowEditItemModal(true);
-                          }}
-                          className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                        >
-                          <i className="ri-edit-line"></i>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteMenuItem(item.id)}
-                          className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-                        >
-                          <i className="ri-delete-bin-line"></i>
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+        <div className="flex items-center space-x-3">
+          {/* Search input + scope */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search items..."
+              className="bg-transparent px-2 py-2 text-sm outline-none w-60"
+            />
+            <select
+              value={searchScope}
+              onChange={(e) => setSearchScope(e.target.value as 'all' | 'name' | 'category')}
+              className="text-sm bg-transparent border-l pl-2 ml-2 outline-none"
+              title="Search scope"
+            >
+              <option value="all">All</option>
+              <option value="name">Name</option>
+              <option value="category">Category</option>
+            </select>
+
+            <button
+              title="Clear search"
+              onClick={() => { setSearchTerm(''); setSearchScope('all'); }}
+              className="ml-2 px-2 py-1 rounded text-sm text-gray-600 hover:bg-gray-100"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Featured filter toggle */}
+          <button
+            type="button"
+            onClick={() => setShowOnlyFeatured((s: boolean) => !s)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              showOnlyFeatured ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-800'
+            }`}
+          >
+            {showOnlyFeatured ? 'Showing: Featured' : 'Show Featured'}
+          </button>
+
+          <button
+            onClick={() => setShowAddItemModal(true)}
+            className="bg-orange-600 text-white px-3 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+          >
+            <i className="ri-add-line mr-2"></i>
+            Add Menu Item
+          </button>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
+        {menuItems.length === 0 ? (
+          <div className="col-span-2 text-center py-8">
+            <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="ri-restaurant-line text-2xl text-gray-400"></i>
             </div>
+            <p className="text-gray-500 mb-4">No menu items yet</p>
+            <button
+              onClick={() => setShowAddItemModal(true)}
+              className="bg-orange-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+            >
+              Add First Item
+            </button>
           </div>
+        ) : (
+          // --- filtering logic (search + featured) ---
+          (() => {
+            const q = (searchTerm || '').trim().toLowerCase();
+
+            const byFeatured = showOnlyFeatured
+              ? menuItems.filter((m: any) => !!m.featured)
+              : menuItems;
+
+            const filtered = q === ''
+              ? byFeatured
+              : byFeatured.filter((m: any) => {
+                  const name = (m.name || '').toString().toLowerCase();
+                  const category = (m.category?.name || '').toString().toLowerCase();
+
+                  if (searchScope === 'name') return name.includes(q);
+                  if (searchScope === 'category') return category.includes(q);
+                  // 'all'
+                  return name.includes(q) || category.includes(q);
+                });
+
+            return filtered.map((item: any) => (
+              <div key={item.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                      <img
+                        src={item.image_url || item.image || '/images/placeholder-food.png'}
+                        alt={item.name}
+                        className="max-w-full max-h-full object-contain object-center"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
+                      />
+                    </div>
+
+                    <div>
+                      <h3 className="font-semibold">{item.name}</h3>
+                      <p className="text-sm text-gray-600 mb-1">{item.category?.name || 'No Category'}</p>
+                      <p className="text-lg font-bold text-orange-600">₨{item.price}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end space-y-2">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {item.is_available ? 'Available' : 'Out of Stock'}
+                    </span>
+
+                    {/* Featured toggle (styled switch) */}
+                    <div className="flex items-center space-x-2">
+                      <span className={`text-xs ${item.featured ? 'text-orange-700 font-semibold' : 'text-gray-600'}`}>Featured</span>
+
+                      <button
+                        title={item.featured ? 'Unfeature item' : 'Feature item'}
+                        onClick={async () => {
+                          // optimistic update
+                          const prevItems = menuItems.slice();
+                          setMenuItems(prevItems.map((m: any) => (m.id === item.id ? { ...m, featured: !m.featured } : m)));
+
+                          const newVal = !item.featured;
+                          try {
+                            // update item in menu_items
+                            const { error: updErr } = await supabase
+                              .from('menu_items')
+                              .update({ featured: newVal })
+                              .eq('id', item.id);
+                            if (updErr) throw updErr;
+
+                            // attempt to insert audit row (best-effort; won't block UI)
+                            try {
+                              const actor = (typeof window !== 'undefined' && localStorage.getItem('userEmail')) || null;
+                              const { error: auditErr } = await supabase
+                                .from('menu_item_featured_audit')
+                                .insert([{
+                                  menu_item_id: item.id,
+                                  changed_by: actor,
+                                  previous: item.featured ?? false,
+                                  current: newVal,
+                                  reason: 'admin_toggle'
+                                }]);
+
+                              if (auditErr) {
+                                console.warn('Audit insert failed', auditErr);
+                                // don't throw — audit is non-blocking
+                              }
+                            } catch (ae) {
+                              console.warn('Audit exception', ae);
+                            }
+                          } catch (err) {
+                            console.error('Failed to update featured flag:', err);
+                            // revert UI
+                            setMenuItems(prevItems);
+                            alert('Unable to update featured status. Please try again.');
+                          }
+                        }}
+                        className={`relative inline-flex items-center h-6 rounded-full w-10 transition-colors focus:outline-none ${item.featured ? 'bg-orange-600' : 'bg-gray-200'}`}
+                      >
+                        <span
+                          className={`transform transition-transform w-4 h-4 bg-white rounded-full ${item.featured ? 'translate-x-4' : 'translate-x-1'}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.description}</p>
+
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                  <span>{item.preparation_time || 15} min prep</span>
+                  {item.is_vegetarian && <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">Vegetarian</span>}
+                </div>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      setSelectedItem(item);
+                      setShowEditItemModal(true);
+                    }}
+                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <i className="ri-edit-line"></i>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMenuItem(item.id)}
+                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                  >
+                    <i className="ri-delete-bin-line"></i>
+                  </button>
+                </div>
+              </div>
+            ));
+          })()
         )}
+      </div>
+    </div>
+  </div>
+)}
 
         {/* Categories Tab */}
         {/* Categories Tab */}
@@ -2438,15 +3085,52 @@ const deleteReview = async (reviewId: number) => {
   <div className="space-y-6">
     <div className="bg-white rounded-2xl shadow-lg p-6">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Menu Categories</h2>
-        <button
-          onClick={() => setShowAddCategoryModal(true)}
-          className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-        >
-          <i className="ri-add-line mr-2"></i>
-          Add Category
-        </button>
+              <div>
+          <h2 className="text-xl font-semibold">Menu Categories</h2>
+          <p className="text-sm text-gray-500">Manage categories — search, view, edit or remove.</p>
+        </div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+
+
+        <div className="flex items-center space-x-3">
+          {/* Search input + scope */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+            <input
+              type="search"
+              value={catSearchTerm}
+              onChange={(e) => setCatSearchTerm(e.target.value)}
+              placeholder="Search categories..."
+              className="bg-transparent px-2 py-2 text-sm outline-none w-56"
+            />
+            <select
+              value={catSearchScope}
+              onChange={(e) => setCatSearchScope(e.target.value as 'all' | 'name' | 'description' | 'items')}
+              className="text-sm bg-transparent border-l pl-2 ml-2 outline-none"
+              title="Search scope"
+            >
+              <option value="all">All</option>
+              <option value="name">Name</option>
+              <option value="description">Description</option>
+              <option value="items">Items</option>
+            </select>
+
+            <button
+              title="Clear search"
+              onClick={() => { setCatSearchTerm(''); setCatSearchScope('all'); }}
+              className="ml-2 px-2 py-1 rounded text-sm text-gray-600 hover:bg-gray-100"
+            >
+              ✕
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowAddCategoryModal(true)}
+            className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
+          >
+            <i className="ri-add-line mr-2"></i>
+            Add Category
+          </button>
+        </div>
       </div>
 
       {/* Category List */}
@@ -2465,119 +3149,113 @@ const deleteReview = async (reviewId: number) => {
             </button>
           </div>
         ) : (
-          categories.map((category) => {
-            // compute icon source (URL or Supabase publicUrl)
-            let iconSrc: string | null = null;
-            if (category.icon) {
-              if (
-                category.icon.startsWith("http://") ||
-                category.icon.startsWith("https://") ||
-                category.icon.startsWith("data:")
-              ) {
-                iconSrc = category.icon;
-              } else {
-                const { data } = supabase
-                  .storage
-                  .from("menu-images")
-                  .getPublicUrl(category.icon);
-                iconSrc = data?.publicUrl ?? null;
-              }
-            }
+          (() => {
+            const q = (catSearchTerm || '').trim().toLowerCase();
 
-            return (
-              <div
-                key={category.id}
-                className="border border-gray-200 rounded-lg p-4"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
-                      {iconSrc ? (
-                        <img
-                          src={iconSrc}
-                          alt={category.name}
-                          className="w-8 h-8 object-cover rounded-full"
-                          onError={(e) =>
-                            ((e.currentTarget as HTMLImageElement).style.display =
-                              "none")
-                          }
-                        />
-                      ) : (
-                        <i className="ri-restaurant-line text-orange-600"></i>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">{category.name}</h3>
-                      <p className="text-sm text-gray-600">
-                        {
-                          menuItems.filter(
-                            (item) => item.category_id === category.id
-                          ).length
-                        }{" "}
-                        items
-                      </p>
+            // compute items count per category quickly
+            const itemCountFor = (catId: any) =>
+              menuItems.filter((item: any) => item.category_id === catId).length;
+
+            const filtered = q === ''
+              ? categories
+              : categories.filter((category: any) => {
+                  const name = (category.name || '').toString().toLowerCase();
+                  const desc = (category.description || '').toString().toLowerCase();
+                  const count = itemCountFor(category.id);
+                  const countStr = String(count);
+
+                  if (catSearchScope === 'name') return name.includes(q);
+                  if (catSearchScope === 'description') return desc.includes(q);
+                  if (catSearchScope === 'items') return countStr.includes(q);
+                  // 'all' -> name OR description OR items count
+                  return name.includes(q) || desc.includes(q) || countStr.includes(q);
+                });
+
+            return filtered.map((category: any) => {
+              // compute icon source (URL or Supabase publicUrl)
+              let iconSrc: string | null = null;
+              if (category.icon) {
+                if (
+                  category.icon.startsWith("http://") ||
+                  category.icon.startsWith("https://") ||
+                  category.icon.startsWith("data:")
+                ) {
+                  iconSrc = category.icon;
+                } else {
+                  const { data } = supabase
+                    .storage
+                    .from("menu-images")
+                    .getPublicUrl(category.icon);
+                  iconSrc = data?.publicUrl ?? null;
+                }
+              }
+
+              const itemCount = itemCountFor(category.id);
+
+              return (
+                <div
+                  key={category.id}
+                  className="border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                        {iconSrc ? (
+                          <img
+                            src={iconSrc}
+                            alt={category.name}
+                            className="w-8 h-8 object-cover rounded-full"
+                            onError={(e) =>
+                              ((e.currentTarget as HTMLImageElement).style.display =
+                                "none")
+                            }
+                          />
+                        ) : (
+                          <i className="ri-restaurant-line text-orange-600"></i>
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{category.name}</h3>
+                        <p className="text-sm text-gray-600">{itemCount} items</p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                  {category.description}
-                </p>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                    {category.description}
+                  </p>
 
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => handleViewCategory(category)}
-                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    <i className="ri-eye-line"></i>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedCategory(category);
-                      setShowEditCategoryModal(true);
-                    }}
-                    className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    <i className="ri-edit-line"></i>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteCategory(category.id)}
-                    className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-                  >
-                    <i className="ri-delete-bin-line"></i>
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleViewCategory(category)}
+                      className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    >
+                      <i className="ri-eye-line"></i>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedCategory(category);
+                        setShowEditCategoryModal(true);
+                      }}
+                      className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    >
+                      <i className="ri-edit-line"></i>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCategory(category.id)}
+                      className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
+                    >
+                      <i className="ri-delete-bin-line"></i>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            });
+          })()
         )}
-
       </div>
-
-
-
-
     </div>
-
-
-
-
-
-
-
-
-    
   </div>
-
-
-
-
-
-
-
-
-
-
 )}
 
 
@@ -2645,6 +3323,7 @@ const deleteReview = async (reviewId: number) => {
       <span className="text-sm">Choose file</span>
     </label>
 
+
     {/* hidden file input — unique id so it doesn't clash with other pickers */}
     <input
       id="add-category-icon-file"
@@ -2661,6 +3340,14 @@ const deleteReview = async (reviewId: number) => {
   {/* Upload controls + preview (reuses your existing upload helpers/state) */}
   <div className="mt-4">
     <div className="flex items-center space-x-3">
+
+
+
+
+
+
+
+
       <button
         type="button"
         onClick={handleUpload}
@@ -2996,6 +3683,14 @@ const deleteReview = async (reviewId: number) => {
     <img src={previewUrl} alt="preview" className="w-40 h-28 object-cover rounded mb-2" />
   )}
 
+<label className="inline-flex items-center space-x-2">
+  <input type="checkbox" checked={preserveQuality} onChange={(e) => setPreserveQuality(e.target.checked)} />
+  <span className="text-sm">Preserve original quality / preserve PNG transparency</span>
+</label>
+
+
+
+
   <div className="flex items-center space-x-2">
     <button
       type="button"
@@ -3209,6 +3904,10 @@ const deleteReview = async (reviewId: number) => {
               className="hidden"
             />
           </div>
+<label className="inline-flex items-center space-x-2">
+  <input type="checkbox" checked={preserveQuality} onChange={(e) => setPreserveQuality(e.target.checked)} />
+  <span className="text-sm">Preserve original quality / preserve PNG transparency</span>
+</label>
 
           {/* Upload controls & preview area */}
           <div className="mt-4">
@@ -3338,64 +4037,203 @@ const deleteReview = async (reviewId: number) => {
               </div>
 
               <div className="space-y-6">
+
+
+
+
+
                 {/* Restaurant Info */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">Restaurant Information</h3>
-                    <button
-                      onClick={() => setShowRestaurantInfoModal(true)}
-                      className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                    >
-                      <i className="ri-edit-line"></i>
-                    </button>
-                  </div>
-                  <div className="space-y-2 text-sm">
+<div className="bg-gray-50 rounded-lg p-4">
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-lg font-semibold">Restaurant Information</h3>
+    <button
+      onClick={() => setShowRestaurantInfoModal(true)}
+      className="text-orange-600 hover:text-orange-700 cursor-pointer"
+      title="Edit restaurant info"
+    >
+      <i className="ri-edit-line"></i>
+    </button>
+  </div>
 
-                    
-                    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
-                    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
-                    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
-                    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
-                  
-                  
-                  
-                  </div>
-                </div>
+  <div className="space-y-2 text-sm">
+    <p><strong>Name:</strong> {restaurantInfo?.name ?? '-'}</p>
+    <p><strong>Phone:</strong> {restaurantInfo?.phone ?? '-'}</p>
+    <p><strong>Email:</strong> {restaurantInfo?.email ?? '-'}</p>
+    <p><strong>Address:</strong> {restaurantInfo?.address ?? '-'}</p>
 
-                {/* Admin Management */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">Admin Management</h3>
-                    <button
-                      onClick={() => setShowAdminModal(true)}
-                      className="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 cursor-pointer text-sm"
-                    >
-                      Add Admin
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {admins.length === 0 ? (
-                      <p className="text-gray-500 text-sm">No admins added yet</p>
-                    ) : (
-                      admins.map((admin) => (
-                        <div key={admin.id} className="flex justify-between items-center bg-white p-3 rounded-lg">
-                          <div>
-                            <p className="font-medium text-sm">{admin.name}</p>
-                            <p className="text-xs text-gray-500">{admin.email}</p>
-                          </div>
-                          <button
-                            onClick={() => removeAdmin(admin.id)}
-                            className="text-red-600 hover:text-red-700 cursor-pointer"
-                          >
-                            <i className="ri-delete-bin-line"></i>
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+    {/* Social links */}
+    <div className="mt-3">
+      <h4 className="text-sm font-medium text-gray-700 mb-2">Social Links</h4>
 
-                {/* Review Management Summary */}
+      {/* Facebook */}
+      <div className="flex items-center justify-between">
+        {restaurantInfo?.facebook_url ? (
+          <>
+            <a
+              href={restaurantInfo.facebook_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline truncate max-w-xs"
+              title={restaurantInfo.facebook_url}
+            >
+              <i className="ri-facebook-fill mr-2"></i>Facebook
+            </a>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleEditSocial('facebook_url')}
+                className="text-orange-600 hover:text-orange-700"
+                title="Edit Facebook link"
+              >
+                <i className="ri-edit-line"></i>
+              </button>
+              <button
+                onClick={() => handleDeleteSocial('facebook_url')}
+                className="text-red-600 hover:text-red-700"
+                title="Delete Facebook link"
+              >
+                <i className="ri-delete-bin-line"></i>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">Facebook: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+      {/* Instagram */}
+      <div className="flex items-center justify-between mt-2">
+        {restaurantInfo?.instagram_url ? (
+          <>
+            <a
+              href={restaurantInfo.instagram_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-pink-600 hover:underline truncate max-w-xs"
+              title={restaurantInfo.instagram_url}
+            >
+              <i className="ri-instagram-line mr-2"></i>Instagram
+            </a>
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleEditSocial('instagram_url')} className="text-orange-600 hover:text-orange-700" title="Edit Instagram link"><i className="ri-edit-line"></i></button>
+              <button onClick={() => handleDeleteSocial('instagram_url')} className="text-red-600 hover:text-red-700" title="Delete Instagram link"><i className="ri-delete-bin-line"></i></button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">Instagram: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+      {/* TikTok */}
+      <div className="flex items-center justify-between mt-2">
+        {restaurantInfo?.tiktok_url ? (
+          <>
+            <a
+              href={restaurantInfo.tiktok_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-black hover:underline truncate max-w-xs"
+              title={restaurantInfo.tiktok_url}
+            >
+              <i className="ri-play-circle-line mr-2"></i>TikTok
+            </a>
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleEditSocial('tiktok_url')} className="text-orange-600 hover:text-orange-700" title="Edit TikTok link"><i className="ri-edit-line"></i></button>
+              <button onClick={() => handleDeleteSocial('tiktok_url')} className="text-red-600 hover:text-red-700" title="Delete TikTok link"><i className="ri-delete-bin-line"></i></button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-gray-500">TikTok: —</span>
+            <button onClick={() => setShowRestaurantInfoModal(true)} className="text-orange-600 hover:text-orange-700">Add</button>
+          </>
+        )}
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+{/* Admin Management */}
+<div className="bg-gray-50 rounded-lg p-4">
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-lg font-semibold">Admin Management</h3>
+    <button
+      onClick={() => { setEditingAdmin(null); setShowAdminModal(true); }}
+      className="bg-orange-600 text-white px-3 py-1 rounded-lg hover:bg-orange-700 cursor-pointer text-sm"
+    >
+      Add Admin
+    </button>
+  </div>
+
+  {operationError && (
+    <div className="mb-3 text-sm text-red-600">{operationError}</div>
+  )}
+
+  <div className="space-y-2">
+    {loadingAdmins ? (
+      <p className="text-gray-500 text-sm">Loading admins...</p>
+    ) : admins.length === 0 ? (
+      <p className="text-gray-500 text-sm">No admins added yet</p>
+    ) : (
+      admins.map((admin: any) => (
+        <div key={admin.id} className="flex justify-between items-center bg-white p-3 rounded-lg">
+          <div>
+            <p className="font-medium text-sm">
+              {admin.first_name || admin.name || `${admin.first_name ?? ""} ${admin.last_name ?? ""}`.trim() || "Admin"}
+            </p>
+            <p className="text-xs text-gray-500">{admin.email}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setEditingAdmin(admin); setShowAdminModal(true); }}
+              className="text-indigo-600 hover:text-indigo-700 cursor-pointer text-sm"
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={() => removeAdmin(admin.id)}
+              className="text-red-600 hover:text-red-700 cursor-pointer"
+            >
+              <i className="ri-delete-bin-line"></i>
+            </button>
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+                {/* Review Management Summary
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="text-lg font-semibold mb-2">Review Management</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -3408,14 +4246,24 @@ const deleteReview = async (reviewId: number) => {
                       <p className="text-gray-600">Pending</p>
                     </div>
                   </div>
-                </div>
+                </div> */}
               </div>
             </div>
           </div>
         </div>
       )}
 
+
+
+
+
+
+
+
       {/* Restaurant Info Modal */}
+
+
+
       {showRestaurantInfoModal && restaurantInfo ? (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
@@ -3439,7 +4287,12 @@ updateRestaurantInfo({
   phone: String(formData.get('phone') ?? ''),
   email: String(formData.get('email') ?? ''),
   address: String(formData.get('address') ?? ''),
-  coordinates: String(formData.get('coordinates') ?? '')
+  coordinates: String(formData.get('coordinates') ?? ''),
+
+  // NEW social fields (defaults to '' or null)
+  facebook_url: (String(formData.get('facebook_url') ?? '')).trim() || null,
+  instagram_url: (String(formData.get('instagram_url') ?? '')).trim() || null,
+  tiktok_url: (String(formData.get('tiktok_url') ?? '')).trim() || null
 });
 
 
@@ -3465,7 +4318,6 @@ updateRestaurantInfo({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
@@ -3496,6 +4348,52 @@ updateRestaurantInfo({
                   required
                 />
               </div>
+
+
+
+
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Facebook URL</label>
+  <input
+    type="url"
+    name="facebook_url"
+    defaultValue={restaurantInfo?.facebook_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://facebook.com/yourpage"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">Instagram URL</label>
+  <input
+    type="url"
+    name="instagram_url"
+    defaultValue={restaurantInfo?.instagram_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://instagram.com/yourhandle"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">TikTok URL</label>
+  <input
+    type="url"
+    name="tiktok_url"
+    defaultValue={restaurantInfo?.tiktok_url ?? ''}
+    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    placeholder="https://tiktok.com/@yourhandle"
+  />
+</div>
+
+
+
+
+
+
+
+
+
               <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
@@ -3516,76 +4414,253 @@ updateRestaurantInfo({
         </div>
       ): null}
 
-      {/* Add Admin Modal */}
-      {showAdminModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold">Add New Admin</h3>
-              <button
-                onClick={() => setShowAdminModal(false)}
-                className="text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <i className="ri-close-line text-xl"></i>
-              </button>
-            </div>
 
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target as HTMLFormElement);
-              addAdmin({
-                name: formData.get('name') as string,
-                email: formData.get('email') as string,
-                password: formData.get('password') as string
-              });
-              setShowAdminModal(false);
-            }} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                <input
-                  type="password"
-                  name="password"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  required
-                />
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAdminModal(false)}
-                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer whitespace-nowrap"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer whitespace-nowrap"
-                >
-                  Add Admin
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+
+
+
+{/* Add Admin Modal */}
+{showAdminModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-semibold">Add New Admin</h3>
+        <button
+          onClick={() => setShowAdminModal(false)}
+          className="text-gray-400 hover:text-gray-600 cursor-pointer"
+        >
+          <i className="ri-close-line text-xl"></i>
+        </button>
+      </div>
+
+
+
+
+
+<form
+  onSubmit={async (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const fd = new FormData(form);
+
+      const first_name = (fd.get("first_name") as string || "").trim();
+      const last_name = (fd.get("last_name") as string || "").trim();
+      const email = (fd.get("email") as string || "").trim();
+      const password = (fd.get("password") as string || "").trim();
+      const phone = (fd.get("phone") as string || "").trim();
+      const role = (fd.get("role") as string || "").trim() || "admin";
+      const user_type = (fd.get("user_type") as string || "").trim() || role;
+
+      const address_street = (fd.get("address_street") as string || "").trim();
+      const address_city = (fd.get("address_city") as string || "").trim();
+      const address_state = (fd.get("address_state") as string || "").trim();
+      const address_zip_code = (fd.get("address_zip_code") as string || "").trim();
+
+      const isEdit = !!(editingAdmin && editingAdmin.id);
+      if (!email) { alert("Email is required."); return; }
+      if (!isEdit && !password) { alert("Password is required for new admin."); return; }
+
+      const payload: any = {
+        first_name: first_name || null,
+        last_name: last_name || null,
+        email,
+        phone: phone || null,
+        role,
+        user_type,
+        // include flat address fields; handleAdminSave will convert them
+        address_street: address_street || null,
+        address_city: address_city || null,
+        address_state: address_state || null,
+        address_zip_code: address_zip_code || null,
+      };
+
+      if (!isEdit) payload.password = password;
+      else {
+        payload.id = editingAdmin.id;
+        if (password) payload.password = password;
+      }
+
+      // hand-off to universal save (converts address -> address object)
+      await handleAdminSave(payload);
+
+      // UI cleanup (handleAdminSave already closes modal on success)
+    } catch (err: any) {
+      console.error("Admin add/edit submit error:", err);
+      setOperationError(err?.message ?? "Failed to save admin");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }}
+  className="space-y-4"
+>
+
+
+
+
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">First name</label>
+    <input
+      type="text"
+      name="first_name"
+      defaultValue={editingAdmin?.first_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ')[0] : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="First name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Last name</label>
+    <input
+      type="text"
+      name="last_name"
+      defaultValue={editingAdmin?.last_name ?? (editingAdmin?.name ? editingAdmin.name.split(' ').slice(1).join(' ') : '')}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="Last name"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+    <input
+      type="email"
+      name="email"
+      defaultValue={editingAdmin?.email ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="email@example.com"
+      required
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Password {editingAdmin ? <span className="text-xs text-gray-500">(leave blank to keep)</span> : null}</label>
+    <input
+      type="password"
+      name="password"
+      defaultValue={''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder={editingAdmin ? 'Leave blank to keep current password' : 'Choose a strong password'}
+      // do not set required here; we validate above based on isEdit
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+    <input
+      type="tel"
+      name="phone"
+      defaultValue={editingAdmin?.phone ?? ''}
+      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+      placeholder="9876543210"
+    />
+  </div>
+
+  <div className="grid grid-cols-2 gap-3">
+    <select name="role" defaultValue={editingAdmin?.role ?? 'admin'} className="p-3 border rounded-lg">
+      <option value="admin">Admin</option>
+      <option value="superadmin">Superadmin</option>
+      <option value="user">User</option>
+    </select>
+
+    <input type="hidden" name="user_type" defaultValue={editingAdmin?.user_type ?? (editingAdmin?.role ?? 'admin')} />
+  </div>
+
+
+
+
+
+
+
+
+
+
+
+
+{/* Address (prefill from editingAdmin.address) */}
+<div>
+  <label className="block text-sm font-medium mb-2">Street</label>
+  <input
+    type="text"
+    name="address_street"
+    defaultValue={editingAdmin?.address?.street ?? editingAdmin?.address_street ?? ""}
+    placeholder="Street"
+    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+</div>
+<div className="grid grid-cols-3 gap-3">
+  <input
+    type="text"
+    name="address_city"
+    placeholder="City"
+    defaultValue={editingAdmin?.address?.city ?? editingAdmin?.address_city ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_state"
+    placeholder="State"
+    defaultValue={editingAdmin?.address?.state ?? editingAdmin?.address_state ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+  <input
+    type="text"
+    name="address_zip_code"
+    placeholder="Zip Code"
+    defaultValue={editingAdmin?.address?.zip ?? editingAdmin?.address_zip_code ?? ""}
+    className="p-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+  />
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  {/* Actions */}
+  <div className="flex space-x-3 pt-4">
+    <button
+      type="button"
+      onClick={() => { setShowAdminModal(false); setEditingAdmin(null); }}
+      className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 cursor-pointer"
+    >
+      Cancel
+    </button>
+    <button
+      type="submit"
+      className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 cursor-pointer"
+    >
+      {editingAdmin ? 'Update Admin' : 'Add Admin'}
+    </button>
+  </div>
+</form>
+
+
+
+
+
+
+    </div>
+  </div>
+)}
 
       {/* Category Modal */}
 {showCategoryModal && selectedCategory && (() => {
@@ -3629,7 +4704,7 @@ updateRestaurantInfo({
                     <img
                       src={selectedIconSrc}
                       alt={selectedCategory.name}
-                      className="w-full h-full object-cover"
+                      className="max-w-full max-h-full object-contain object-center"
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                       }}
