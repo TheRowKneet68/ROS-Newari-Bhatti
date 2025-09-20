@@ -283,24 +283,75 @@ export default function OrderModal({
                   <span className="text-gray-500">Phone:</span>
                   <span className="font-medium">{order.customer?.phone || order.phone}</span>
                 </div>
-                {order.orderType === 'delivery' && order.address && (
+                {/* {order.orderType === 'delivery' && order.address && (
                   <div className="flex justify-between items-start">
                     <span className="text-gray-500">Address:</span>
                     <span className="font-medium text-right">
                       {order.address?.street}, {order.address?.city}, {order.address?.state} {order.address?.zipCode}
                     </span>
                   </div>
-                )}
+                )} */}
+
+
+
+
+
+{/* Delivery address (robust / tolerant) */}
+{(
+  // determine if this is a delivery order (accept different naming)
+  ((order.orderType || order.order_type || order.order_type === 'delivery') || '')
+    .toString()
+    .toLowerCase() === 'delivery'
+) && (() => {
+  // normalize address from multiple possible places
+  const addr =
+    order.address ||
+    order.delivery_address ||
+    order.deliveryAddress ||
+    order.delivery ||
+    // sometimes stored directly on order as fields
+    (order.delivery_street || order.address_street ? {
+      street: order.delivery_street || order.address_street,
+      city: order.delivery_city || order.address_city,
+      state: order.delivery_state || order.address_state,
+      zipCode: order.delivery_zipCode || order.address_zipCode || order.delivery_zip || order.zipCode
+    } : null);
+
+  // helper to check if any address part exists
+  const hasAddr = addr && (addr.street || addr.city || addr.state || addr.zipCode || addr.postal || addr.pincode);
+
+  return (
+    <div className="flex justify-between items-start">
+      <span className="text-gray-500">Address:</span>
+
+      <span className="font-medium text-right max-w-[60%]">
+        {hasAddr ? (
+          <>
+            {addr.street ? <>{addr.street}{addr.city || addr.state || addr.zipCode ? ', ' : ''}</> : null}
+            {addr.city ? <>{addr.city}{addr.state || addr.zipCode ? ', ' : ''}</> : null}
+            {addr.state ? <>{addr.state}{addr.zipCode ? ' ' : ''}</> : null}
+            {addr.zipCode || addr.postal || addr.pincode ? <>{addr.zipCode || addr.postal || addr.pincode}</> : null}
+          </>
+        ) : (
+          <span className="text-gray-400">Address not available</span>
+        )}
+      </span>
+    </div>
+  );
+})()}
+
+
+
+
+
+
+
+
+
               </div>
             </section>
 
             {/* Items */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <i className="ri-restaurant-line text-orange-600 mr-2"></i>
-                Order Items ({itemsToRender.length})
-                {resolving && <span className="ml-3 text-sm text-gray-500">resolving images…</span>}
-              </h3>
 
 
 {/* Items — bill / receipt style */}
@@ -390,10 +441,6 @@ export default function OrderModal({
               </div>
 
 
-
-
-
-</div>
 
 
 
