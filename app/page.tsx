@@ -497,8 +497,13 @@ enriched.sort((a: any, b: any) => {
 
 
 
+setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
 
-      setFeaturedItems(enriched.slice(0, 3).map((i: any) => i));
+      
+      
+      
+      
+      
       setMenuItems(enriched.map((i: any) => i));
 
       try {
@@ -839,13 +844,14 @@ enriched.sort((a: any, b: any) => {
 
   return (
     <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative">
-      <div className="aspect-video relative">
-        <img
-          src={item.image_url || item.image}
-          alt={item.name}
-          loading="lazy"
-          className="w-full h-full object-cover object-top"
-        />
+<div className="aspect-video relative bg-gray-100 flex items-center justify-center">
+  <img
+    src={item.image_url || '/images/placeholder-food.png'}
+    alt={item.name}
+    className="max-h-full max-w-full object-contain object-center"
+    loading="lazy"
+    onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
+  />
 
         {/* Badges in top-left */}
         <div className="absolute top-3 left-3 flex gap-2">
@@ -915,6 +921,13 @@ enriched.sort((a: any, b: any) => {
           </div>
         </div>
       </section>
+
+
+
+
+
+
+
 
       {/* Customer Reviews Section */}
 {/* Customer Reviews Section */}
