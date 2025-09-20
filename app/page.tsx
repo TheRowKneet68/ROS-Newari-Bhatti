@@ -392,6 +392,57 @@ const normalizeUrl = (raw?: string | null): string | null => {
 
 
 
+// filtered + searched items for menu listing (case-insensitive, name/description/category)
+// Place this after the useEffect that sets searchResults (before parseTimeSafe)
+const filteredItems = useMemo(() => {
+  // shallow copy so we don't mutate original menuItems
+  let items = Array.isArray(menuItems) ? [...menuItems] : [];
+
+  // Filter by selectedCategory if set and not 'all'
+  if (selectedCategory && selectedCategory !== 'all') {
+    items = items.filter((it: any) => {
+      // item may have category_id, or category object with id/slug
+      if (String(it.category_id) === String(selectedCategory)) return true;
+      if (it.category) {
+        if (String(it.category.id) === String(selectedCategory)) return true;
+        if (String(it.category.slug) === String(selectedCategory)) return true;
+      }
+      return false;
+    });
+  }
+
+  // Apply search across name, description and category fields (case-insensitive)
+  const q = (searchTerm || '').trim().toLowerCase();
+  if (q.length > 0) {
+    items = items.filter((it: any) => {
+      const name = String(it.name || '').toLowerCase();
+      const desc = String(it.description || '').toLowerCase();
+      const catName = String(it.category?.name || it.category || '').toLowerCase();
+      const catSlug = String(it.category?.slug || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        desc.includes(q) ||
+        catName.includes(q) ||
+        (catSlug && catSlug.includes(q))
+      );
+    });
+  }
+
+  // Sort final list A → Z by name (safe fallback)
+  items.sort((a: any, b: any) => {
+    const an = String(a.name || '').toLowerCase();
+    const bn = String(b.name || '').toLowerCase();
+    return an.localeCompare(bn);
+  });
+
+  return items;
+}, [menuItems, searchTerm, selectedCategory]);
+
+
+
+
+
+
 
 const parseTimeSafe = (v: any): number => {
   if (!v && v !== 0) return 0;
@@ -755,43 +806,41 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
       </div>
     ) : (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-        {categories.map((category: any, index: number) => {
-          const src = categoryIconMap?.[category.id] ?? null;
+        {[...categories]
+          .sort((a: any, b: any) => a.name.localeCompare(b.name))
+          .map((category: any, index: number) => {
+            const src = categoryIconMap?.[category.id] ?? null;
 
-          return (
-            <Link
-              key={category.id ?? index}
-              href={`/menu?category=${encodeURIComponent(category.slug || category.id)}`}
-              className="block group"
-            >
-              <div className="relative w-full h-40 sm:h-48 lg:h-56 rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
-                {src ? (
-                  <img
-                    src={src}
-                    alt={category.name}
-                    loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
-                    <i className="ri-restaurant-line text-4xl text-gray-400"></i>
+            return (
+              <Link
+                key={category.id ?? index}
+                href={`/menu?category=${encodeURIComponent(category.slug || category.id)}`}
+                className="block group"
+              >
+                <div className="relative w-full h-40 sm:h-48 lg:h-56 rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
+                  {src ? (
+                    <img
+                      src={src}
+                      alt={category.name}
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
+                      <i className="ri-restaurant-line text-4xl text-gray-400"></i>
+                    </div>
+                  )}
+
+                  {/* Overlay for name */}
+                  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors"></div>
+                  <div className="absolute bottom-3 left-3 right-3 text-white font-semibold text-lg sm:text-xl">
+                    {category.name}
                   </div>
-                )}
-
-                {/* Overlay for name */}
-                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors"></div>
-                <div className="absolute bottom-3 left-3 right-3 text-white font-semibold text-lg sm:text-xl">
-                  {category.name}
                 </div>
-              </div>
-            </Link>
-          );
-        })}
-      
-
+              </Link>
+            );
+          })}
       </div>
-
-
     )}
   </div>
 </section>
@@ -809,118 +858,149 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
 
 
 
+{/* Featured Items */}
+<section className="py-16 bg-gray-50">
+  <div className="container mx-auto px-4">
+    <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">
+      Featured Dishes
+    </h2>
 
-      {/* Featured Items */}
-      <section className="py-16 bg-gray-50">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Featured Dishes</h2>
+    {loading ? (
+      // Skeleton cards for featured items
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
+      </div>
+    ) : featuredItems.length === 0 ? (
+      <div className="text-center py-16">
+        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i className="ri-restaurant-line text-2xl text-gray-400"></i>
+        </div>
+        <h3 className="text-xl font-semibold text-gray-600 mb-2">
+          No Menu Items Yet
+        </h3>
+        <p className="text-gray-500 mb-6">
+          Featured dishes will appear here once the owner adds menu items
+        </p>
+        <Link
+          href="/menu"
+          className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap"
+        >
+          View Menu
+        </Link>
+      </div>
+    ) : (
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
+        {[...featuredItems]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((item) => {
+            const meta = item.__meta || {};
+            const isNew = !!meta.isNew;
+            const isEdited = !!meta.isEdited;
 
-          {loading ? (
-            // Skeleton cards for featured items
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse"><SkeletonCard /></div>
-              <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
-            </div>
-          ) : featuredItems.length === 0 ? (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="ri-restaurant-line text-2xl text-gray-400"></i>
+            return (
+              <div
+                key={item.id}
+                className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative"
+              >
+                <div className="aspect-video relative bg-gray-100 flex items-center justify-center">
+                  <img
+                    src={item.image_url || "/images/placeholder-food.png"}
+                    alt={item.name}
+                    className="max-h-full max-w-full object-contain object-center"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        "/images/placeholder-food.png";
+                    }}
+                  />
+
+                  {/* Badges in top-left */}
+                  <div className="absolute top-3 left-3 flex gap-2">
+                    {isNew && (
+                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">
+                        NEW
+                      </span>
+                    )}
+                    {isEdited && (
+                      <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">
+                        EDITED
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="text-xl font-bold text-gray-800">
+                      {item.name}
+                    </h3>
+                    <span className="text-xl font-bold text-orange-600">
+                      ₨{item.price}
+                    </span>
+                  </div>
+
+                  <p className="text-gray-600 mb-4">{item.description}</p>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                      {item.category?.name || item.category}
+                    </span>
+
+                    {cartItems[item.id] ? (
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => {
+                            const newQty = Math.max(
+                              0,
+                              (cartItems[item.id] || 0) - 1
+                            );
+                            updateQuantity(item.id, newQty);
+                          }}
+                          className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
+                        >
+                          <i className="ri-subtract-line"></i>
+                        </button>
+
+                        <span className="font-semibold text-lg">
+                          {cartItems[item.id]}
+                        </span>
+
+                        <button
+                          onClick={() => addToCart(item.id, 1)}
+                          className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
+                        >
+                          <i className="ri-add-line"></i>
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => addToCart(item.id, 1)}
+                        className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Add to Cart
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">No Menu Items Yet</h3>
-              <p className="text-gray-500 mb-6">Featured dishes will appear here once the owner adds menu items</p>
-              <Link href="/menu" className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-                View Menu
-              </Link>
-            </div>
-          ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
-             
-             
-{featuredItems.map((item) => {
-  const meta = item.__meta || {};
-  const isNew = !!meta.isNew;
-  const isEdited = !!meta.isEdited;
-
-  return (
-    <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative">
-<div className="aspect-video relative bg-gray-100 flex items-center justify-center">
-  <img
-    src={item.image_url || '/images/placeholder-food.png'}
-    alt={item.name}
-    className="max-h-full max-w-full object-contain object-center"
-    loading="lazy"
-    onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
-  />
-
-        {/* Badges in top-left */}
-        <div className="absolute top-3 left-3 flex gap-2">
-          {isNew && <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">NEW</span>}
-          {isEdited && <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">EDITED</span>}
-        </div>
+            );
+          })}
       </div>
+    )}
 
-      <div className="p-6">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
-          <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
-        </div>
-
-        <p className="text-gray-600 mb-4">{item.description}</p>
-
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-            {item.category?.name || item.category}
-          </span>
-
-          {cartItems[item.id] ? (
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  const newQty = Math.max(0, (cartItems[item.id] || 0) - 1);
-                  updateQuantity(item.id, newQty);
-                }}
-                className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
-              >
-                <i className="ri-subtract-line"></i>
-              </button>
-
-              <span className="font-semibold text-lg">{cartItems[item.id]}</span>
-
-              <button
-                onClick={() => addToCart(item.id, 1)}
-                className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
-              >
-                <i className="ri-add-line"></i>
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => addToCart(item.id, 1)}
-              className="bg-orange-600 text-white px-6 py-2 rounded-full hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              Add to Cart
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="text-center mt-12">
+      <Link
+        href="/menu"
+        className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap"
+      >
+        View Full Menu
+      </Link>
     </div>
-  );
-})}
+  </div>
+</section>
 
-
-
-
-            </div>
-          )}
-
-          <div className="text-center mt-12">
-            <Link href="/menu" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors whitespace-nowrap">
-              View Full Menu
-            </Link>
-          </div>
-        </div>
-      </section>
 
 
 
