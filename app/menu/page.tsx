@@ -1,511 +1,420 @@
+// app/menu/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import Header from '../../components/Header';
+import { useState, Suspense, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { supabase } from '../../lib/supabaseClient';
 
-interface OrderModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  order: any;
-  onStatusUpdate: (orderId: string, newStatus: string) => void;
-  onCancelOrder?: (orderId: string) => void;
-}
+function MenuContent() {
+  const searchParams = useSearchParams();
+  const categoryFromUrl = searchParams?.get('category') || '';
+  
+  const [selectedCategory, setSelectedCategory] = useState(String(categoryFromUrl || 'all'));
+  const [searchTerm, setSearchTerm] = useState('');
+  const [cartItems, setCartItems] = useState<{[key: number]: number}>({});
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
-
-// --- helper: resolve storage path to usable URL (public => signed)
-async function resolveStorageUrl(path?: string | null, bucket = 'menu-images', signedExpirySec = 60 * 60 * 24) {
-  if (!path) return null;
-  // if already a full URL
-  if (typeof path === 'string' && /^(https?:)?\/\//i.test(path)) return path;
-
-  try {
-    // try public url
-    const publicResp: any = await supabase.storage.from(bucket).getPublicUrl(path);
-    const publicUrl = publicResp?.data?.publicUrl || publicResp?.publicURL || null;
-    if (publicUrl) return publicUrl;
-
-    // fallback: create signed url
-    const signedResp: any = await supabase.storage.from(bucket).createSignedUrl(path, signedExpirySec);
-    const signedUrl = signedResp?.data?.signedUrl || signedResp?.signedURL || null;
-    if (signedUrl) return signedUrl;
-  } catch (err) {
-    console.warn('resolveStorageUrl error', err);
-  }
-
-  return null;
-}
-
-// --- helper: batch enrich items using menu_items.image_url and resolve storage URLs
-async function enrichAndResolveItemImages(items: any[]) {
-  if (!Array.isArray(items) || items.length === 0) return [];
-
-  // gather numeric ids
-  const ids = items.map((i) => Number(i.id)).filter(Boolean);
-  let menuMap = new Map<string, string>();
-
-  if (ids.length) {
-    try {
-      const { data: menuRows, error } = await supabase
-        .from('menu_items')
-        .select('id, image_url')
-        .in('id', ids);
-
-      if (!error && Array.isArray(menuRows)) {
-        menuMap = new Map(menuRows.map((r: any) => [String(r.id), r.image_url]));
-      }
-    } catch (err) {
-      console.warn('Failed to fetch menu_items', err);
-    }
-  }
-
-  const resolved = await Promise.all(
-    items.map(async (item) => {
-      try {
-        const imgField = item.image || undefined;
-        // 1) if item.image is full url -> use it
-        if (imgField && typeof imgField === 'string' && /^(https?:)?\/\//i.test(imgField)) {
-          return { ...item, imageResolved: imgField };
-        }
-
-        // 2) if item.image is a storage path -> try resolve
-        if (imgField && typeof imgField === 'string' && imgField.trim() !== '') {
-          const resolvedUrl = await resolveStorageUrl(imgField);
-          if (resolvedUrl) return { ...item, imageResolved: resolvedUrl };
-        }
-
-        // 3) try menu_items.image_url lookup
-        const menuImg = menuMap.get(String(item.id));
-        if (menuImg) {
-          if (/^(https?:)?\/\//i.test(menuImg)) {
-            return { ...item, imageResolved: menuImg };
-          }
-          const resolvedFromMenu = await resolveStorageUrl(menuImg);
-          if (resolvedFromMenu) return { ...item, imageResolved: resolvedFromMenu };
-        }
-      } catch (err) {
-        console.warn('error resolving image for item', item, err);
-      }
-
-      // no image found -> undefined (UI will fallback)
-      return { ...item, imageResolved: undefined };
-    })
-  );
-
-  return resolved;
-}
-
-export default function OrderModal({
-  isOpen,
-  onClose,
-  order,
-  onStatusUpdate,
-  onCancelOrder
-}: OrderModalProps) {
-  const [status, setStatus] = useState(order?.status || 'placed');
-  const [notes, setNotes] = useState(order?.notes || '');
-  const [resolvedItems, setResolvedItems] = useState<any[]>([]);
-  const [resolving, setResolving] = useState(false);
-
-  useEffect(() => {
-    if (order) {
-      setStatus(order.status || 'placed');
-      setNotes(order.notes || '');
-    }
-  }, [order]);
-
-  // resolve images when order.items change
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setResolving(true);
-      try {
-        const items = Array.isArray(order?.items) ? order.items : [];
-        const enriched = await enrichAndResolveItemImages(items);
-        if (mounted) setResolvedItems(enriched);
-      } catch (err) {
-        console.error('Failed to enrich/resolve images', err);
-        if (mounted) setResolvedItems(order?.items || []);
-      } finally {
-        if (mounted) setResolving(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [order?.items]);
-
-  if (!isOpen || !order) return null;
-
-  const statusOptions = [
-    { value: 'placed', label: 'Order Placed' },
-    { value: 'preparing', label: 'Preparing' },
-    { value: 'ready', label: 'Ready' },
-    { value: 'on-the-way', label: 'On the Way' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' }
-  ];
-
-  const handleStatusUpdate = () => {
-    onStatusUpdate(order.id, status);
-    try {
-      const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-      const updatedOrders = allOrders.map((o: any) =>
-        o.id === order.id ? { ...o, status, notes } : o
-      );
-      localStorage.setItem('allOrders', JSON.stringify(updatedOrders));
-    } catch (e) {}
-    try {
-      const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
-      const updatedUserOrders = userOrders.map((o: any) =>
-        o.id === order.id ? { ...o, status, notes } : o
-      );
-      localStorage.setItem('userOrders', JSON.stringify(updatedUserOrders));
-    } catch (e) {}
-    onClose();
-  };
-
-  const handleCancel = async () => {
-    if (onCancelOrder) {
-      try {
-        onCancelOrder(order.id);
-      } catch (err) {
-        console.error('onCancelOrder threw:', err);
-      }
-      onClose();
-      return;
-    }
-
-    const newStatus = 'cancelled';
-    onStatusUpdate(order.id, newStatus);
-
-    try {
-      const allOrders = JSON.parse(localStorage.getItem('allOrders') || '[]');
-      const updatedOrders = allOrders.map((o: any) =>
-        o.id === order.id ? { ...o, status: newStatus, notes } : o
-      );
-      localStorage.setItem('allOrders', JSON.stringify(updatedOrders));
-    } catch (e) {}
-    try {
-      const userOrders = JSON.parse(localStorage.getItem('userOrders') || '[]');
-      const updatedUserOrders = userOrders.map((o: any) =>
-        o.id === order.id ? { ...o, status: newStatus, notes } : o
-      );
-      localStorage.setItem('userOrders', JSON.stringify(updatedUserOrders));
-    } catch (e) {}
-
-    setStatus(newStatus);
-    onClose();
-  };
-
-  const getStatusInfo = (s: string) => {
-    switch ((s || '').toLowerCase()) {
-      case 'placed':
-        return { label: 'Placed', color: 'bg-blue-400 text-blue-800' };
-      case 'preparing':
-        return { label: 'Preparing', color: 'bg-yellow-400 text-yellow-800' };
-      case 'ready':
-        return { label: 'Ready', color: 'bg-orange-400 text-orange-800' };
-      case 'on-the-way':
-        return { label: 'On the Way', color: 'bg-purple-400 text-purple-800' };
-      case 'completed':
-        return { label: 'Completed', color: 'bg-green-400 text-green-800' };
-      case 'cancelled':
-        return { label: 'Cancelled', color: 'bg-red-400 text-red-800' };
-      case 'delivery':
-        return { label: 'Delivery', color: 'bg-teal-400 text-teal-800' };
-      case 'pickup':
-        return { label: 'Pickup', color: 'bg-cyan-400 text-cyan-800' };
-      default:
-        return { label: s || 'Unknown', color: 'bg-gray-100 text-gray-800' };
-    }
-  };
-
-  const { label, color } = getStatusInfo(status);
-  const orderDate = order.orderDate || order.created_at || order.createdAt || new Date().toISOString();
-
-  // choose which list to render: resolvedItems (if ready) else fallback to order.items
-  const itemsToRender = resolvedItems.length ? resolvedItems : (order.items || []);
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b p-6 rounded-t-2xl">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-800">Order Details</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
-              <i className="ri-close-line text-2xl"></i>
-            </button>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="flex justify-between items-start mb-2">
-              <div>
-                <h3 className="text-lg font-semibold">Order #{order.id}</h3>
-                <p className="text-gray-600">{new Date(orderDate).toLocaleString()}</p>
-              </div>
-              <span className={`px-3 py-1 rounded-full text-sm font-semibold ${color}`}>
-                {label}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-500">Order Type:</span>
-                <span className="ml-2 font-medium capitalize">{order.orderType || order.order_type || ''}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">Payment:</span>
-                <span className="ml-2 font-medium">{order.paymentMethod || order.payment_method || '—'}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Customer Information */}
-          <div className="space-y-8">
-            <section>
-              <h4 className="text-xl font-semibold mb-4 text-gray-800 border-b pb-2">Customer Information</h4>
-              <div className="bg-white rounded-xl shadow-sm p-5 space-y-3 border border-gray-100">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Name:</span>
-                  <span className="font-medium">{order.customer?.firstName} {order.customer?.lastName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Email:</span>
-                  <span className="font-medium">{order.customer?.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Phone:</span>
-                  <span className="font-medium">{order.customer?.phone || order.phone}</span>
-                </div>
-                {/* {order.orderType === 'delivery' && order.address && (
-                  <div className="flex justify-between items-start">
-                    <span className="text-gray-500">Address:</span>
-                    <span className="font-medium text-right">
-                      {order.address?.street}, {order.address?.city}, {order.address?.state} {order.address?.zipCode}
-                    </span>
-                  </div>
-                )} */}
+  // ---------- Skeletons ----------
+  const SkeletonCategory = () => (
+    <div className="flex flex-col items-center">
+      <div className="w-16 h-16 bg-gray-200 rounded-full mb-3" />
+      <div className="w-24 h-4 bg-gray-200 rounded-full" />
 
 
 
 
 
-{/* Delivery address (robust / tolerant) */}
-{(
-  // determine if this is a delivery order (accept different naming)
-  ((order.orderType || order.order_type || order.order_type === 'delivery') || '')
-    .toString()
-    .toLowerCase() === 'delivery'
-) && (() => {
-  // normalize address from multiple possible places
-  const addr =
-    order.address ||
-    order.delivery_address ||
-    order.deliveryAddress ||
-    order.delivery ||
-    // sometimes stored directly on order as fields
-    (order.delivery_street || order.address_street ? {
-      street: order.delivery_street || order.address_street,
-      city: order.delivery_city || order.address_city,
-      state: order.delivery_state || order.address_state,
-      zipCode: order.delivery_zipCode || order.address_zipCode || order.delivery_zip || order.zipCode
-    } : null);
 
-  // helper to check if any address part exists
-  const hasAddr = addr && (addr.street || addr.city || addr.state || addr.zipCode || addr.postal || addr.pincode);
 
-  return (
-    <div className="flex justify-between items-start">
-      <span className="text-gray-500">Address:</span>
 
-      <span className="font-medium text-right max-w-[60%]">
-        {hasAddr ? (
-          <>
-            {addr.street ? <>{addr.street}{addr.city || addr.state || addr.zipCode ? ', ' : ''}</> : null}
-            {addr.city ? <>{addr.city}{addr.state || addr.zipCode ? ', ' : ''}</> : null}
-            {addr.state ? <>{addr.state}{addr.zipCode ? ' ' : ''}</> : null}
-            {addr.zipCode || addr.postal || addr.pincode ? <>{addr.zipCode || addr.postal || addr.pincode}</> : null}
-          </>
-        ) : (
-          <span className="text-gray-400">Address not available</span>
-        )}
-      </span>
     </div>
   );
-})()}
 
-
-
-
-
-
-
-
-
-              </div>
-            </section>
-
-            {/* Items */}
-
-
-{/* Items — bill / receipt style */}
-<div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-  <h3 className="text-lg font-semibold mb-4 flex items-center">
-    <i className="ri-restaurant-line text-orange-600 mr-2"></i>
-    Order Items ({itemsToRender.length})
-    {resolving && <span className="ml-3 text-sm text-gray-500">resolving images…</span>}
-  </h3>
-
-  {/* table header */}
-  <div className="grid grid-cols-12 gap-2 text-sm text-gray-500 border-b pb-2 mb-3">
-    <div className="col-span-1 text-left">#</div>
-   
-    <div className="col-span-6 text-left">Item</div>
-     <div className="col-span-2 text-left">Qty</div>
-    <div className="col-span-2 text-right">Price</div>
-    <div className="col-span-1 text-right">Total</div>
-  </div>
-
-  {/* items list */}
-  <div className="space-y-2">
-    {itemsToRender.map((item: any, index: number) => {
-      const qty = Number(item.quantity || 1);
-      const price = Number(item.price || 0);
-      const total = qty * price;
-      const imgSrc =
-        (item.imageResolved && item.imageResolved.trim() !== '')
-          ? item.imageResolved
-          : (item.image && item.image.trim() !== '')
-          ? item.image
-          : `https://readdy.ai/api/search-image?query=delicious%20nepali%20food%20dish%20${encodeURIComponent(item.name || '')}&width=60&height=60&seq=order-item-${index}`;
-
-      return (
-        <div key={index} className="grid grid-cols-12 gap-2 items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="col-span-1 text-sm text-gray-600">{index + 1}</div>
-
-
-          <div className="col-span-6 flex items-center space-x-3">
-            <img
-              src={imgSrc}
-              alt={item.name}
-              className="w-10 h-10 object-cover rounded-md flex-shrink-0"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).onerror = null;
-                (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png';
-              }}
-            />
-            <div>
-              
-              <div className="font-medium text-gray-800">{item.name}</div>
-              {item.notes && <div className="text-xs text-gray-500 mt-0.5">{item.notes}</div>}
-            </div>
-          </div>
-
-          <div className="col-span-2 text-sm text-gray-700 font-medium">{qty}</div>
-
-
-          <div className="col-span-2 text-right font-mono text-sm text-gray-700">₨{price.toLocaleString()}</div>
-
-          <div className="col-span-1 text-right font-mono font-semibold text-gray-800">₨{total.toLocaleString()}</div>
-        </div>
-      );
-    })}
-  </div>
-
-
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <i></i>
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center py-2">
-                  <span className="text-gray-600">Items Subtotal</span>
-                  <span className="font-semibold">₨{(order.subtotal || (order.total || 0)).toLocaleString()}</span>
-                </div>
-
-                <div className="border-t pt-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-800">Total Amount</span>
-                    <span className="text-2xl font-bold text-orange-600">₨{(order.total || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="mt-2 flex justify-between items-center text-sm">
-                    <span className="text-gray-600">Payment Method</span>
-                    <span className="font-medium text-gray-800">{order.paymentMethod || order.payment_method || 'Cash on Delivery'}</span>
-                  </div>
-                </div>
-              </div>
-
-
-
-
-
-
-
-            </div>
-
-
-
-            {/* Status Update */}
-            <section>
-              <h4 className="text-xl font-semibold mb-4 text-gray-800 border-b pb-2">Update Status</h4>
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Order Status</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Notes (Optional)</label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Add any notes about this order..."
-                    className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none bg-white"
-                    rows={3}
-                    maxLength={500}
-                  />
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <div className="sticky bottom-0 bg-white border-t p-6 rounded-b-2xl">
-          <div className="flex space-x-4">
-            <button onClick={onClose} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50">
-              Close
-            </button>
-
-            {order?.status !== 'cancelled' && (
-              <button
-                onClick={handleCancel}
-                className="px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer"
-              >
-                <i className="ri-close-circle-line mr-1"></i> Cancel
-              </button>
-            )}
-
-            <button onClick={handleStatusUpdate} className="flex-1 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700">
-              Update Order
-            </button>
-          </div>
-        </div>
+  const SkeletonCard = () => (
+    <div className="bg-white rounded-2xl p-4 shadow-sm">
+      <div className="aspect-video bg-gray-200 rounded-md mb-4" />
+      <div className="h-5 bg-gray-200 rounded w-3/4 mb-2" />
+      <div className="h-4 bg-gray-200 rounded w-1/2 mb-3" />
+      <div className="flex justify-between items-center">
+        <div className="h-8 w-20 bg-gray-200 rounded-full" />
+        <div className="h-8 w-20 bg-gray-200 rounded-full" />
       </div>
     </div>
+  );
+
+  // ---------- Category icons ----------
+  const BUCKETNAME = 'menu-images';
+
+  const categoryIconMap = useMemo(() => {
+    const map: Record<string, string | null> = {};
+    if (!categories || categories.length === 0) return map;
+
+    categories.forEach((cat: any) => {
+      const raw = (cat.icon ?? cat.icon_url ?? '') as string;
+      if (!raw) {
+        map[cat.id] = null;
+        return;
+      }
+      if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://')) {
+        map[cat.id] = raw;
+        return;
+      }
+      let path = raw;
+      if (path.startsWith(`${BUCKETNAME}/`)) path = path.replace(`${BUCKETNAME}/`, '');
+      if (path.startsWith('/')) path = path.slice(1);
+      try {
+        const { data } = supabase.storage.from(BUCKETNAME).getPublicUrl(path);
+        map[cat.id] = data?.publicUrl ?? null;
+      } catch (err) {
+        console.warn('getPublicUrl error for', path, err);
+        map[cat.id] = null;
+      }
+    });
+    return map;
+  }, [categories]);
+
+  // ---------- Effects ----------
+  useEffect(() => {
+    try {
+      const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
+      setCartItems(savedCart);
+    } catch {
+      setCartItems({});
+    }
+    loadMenuData();
+  }, []);
+
+  const loadMenuData = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-menu-service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ action: 'getMenuData' })
+      });
+
+      const data = await response.json();
+
+
+if (data.success) {
+  const allCategory = { id: 'all', name: 'All Items' };
+
+  // items array (safe)
+  const items = Array.isArray(data.menuItems) ? data.menuItems : [];
+
+  // Build categories (keep counts)
+  const categoriesWithCounts = [(allCategory), ...(data.categories || []).map((cat: any) => ({
+    ...cat,
+    count: items.filter((it: any) => String(it.category_id) === String(cat.id)).length
+  }))];
+  setCategories(categoriesWithCounts);
+
+  // --- robust parsing & flag derivation ---
+  const parseTimeSafe = (v: any): number => {
+    if (!v && v !== 0) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const asNum = Number(v);
+      if (!Number.isNaN(asNum) && String(v).trim().length >= 10) return asNum;
+      const asDate = Date.parse(v);
+      if (!Number.isNaN(asDate)) return asDate;
+      return 0;
+    }
+    try {
+      const cast = new Date(v as any).getTime();
+      return Number.isNaN(cast) ? 0 : cast;
+    } catch {
+      return 0;
+    }
+  };
+
+  const deriveFlagsForItem = (item: any, now = Date.now(), newThresholdMs = 7 * 24 * 60 * 60 * 1000) => {
+    const createdRaw = item.created_at ?? null;
+    const updatedRaw = item.updated_at ?? null;
+
+    const created = parseTimeSafe(createdRaw);
+    const updated = parseTimeSafe(updatedRaw);
+
+    const isEdited = typeof item.isEdited === 'boolean'
+      ? !!item.isEdited
+      : (updated > 0 && created > 0 && updated !== created);
+
+    const isNew = typeof item.isNew === 'boolean'
+      ? !!item.isNew
+      : (created > 0 && (now - created) <= newThresholdMs);
+
+    const lastChanged = Math.max(created || 0, updated || 0);
+
+    return { created, updated, isEdited, isNew, lastChanged };
+  };
+
+  const now = Date.now();
+  const NEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days; adjust if you want
+
+  const enriched = items.map((it: any) => {
+    const meta = deriveFlagsForItem(it, now, NEW_THRESHOLD_MS);
+    return { ...it, __meta: meta };
+  });
+
+  // --- sort: priority new/edited first, then lastChanged desc (newest first) ---
+  enriched.sort((a: any, b: any) => {
+    const A = a.__meta ?? {};
+    const B = b.__meta ?? {};
+
+    const aPriority = (A.isNew || A.isEdited) ? 1 : 0;
+    const bPriority = (B.isNew || B.isEdited) ? 1 : 0;
+    if (aPriority !== bPriority) return bPriority - aPriority; // higher priority first
+
+    const aLast = Number(A.lastChanged || 0);
+    const bLast = Number(B.lastChanged || 0);
+    if (bLast !== aLast) return bLast - aLast;
+
+    const aCreated = Number(A.created || 0);
+    const bCreated = Number(B.created || 0);
+    if (bCreated !== aCreated) return bCreated - aCreated;
+
+    // final fallback: numeric id descending (newer id first) or string fallback
+    const aIdNum = Number(a.id);
+    const bIdNum = Number(b.id);
+    if (!Number.isNaN(aIdNum) && !Number.isNaN(bIdNum)) {
+      return bIdNum - aIdNum;
+    }
+    return String(b.id || '').localeCompare(String(a.id || ''));
+  });
+
+  // set state & cache sorted enriched items
+  setMenuItems(enriched.map((i: any) => i));
+  try {
+    localStorage.setItem('menuItems', JSON.stringify(enriched));
+  } catch (e) {
+    console.warn('Unable to cache menu items', e);
+  }
+}
+
+
+
+    } catch (error) {
+      console.error('Error loading menu data:', error);
+    }
+    setLoading(false);
+  };
+
+  // ---------- Helpers ----------
+const filteredItems = menuItems.filter(item => {
+  const itemCatId = String(item.category_id ?? item.category?.id ?? '');
+  const matchesCategory =
+    selectedCategory === 'all' ||
+    itemCatId === String(selectedCategory) ||
+    (item.category?.slug && item.category.slug === selectedCategory);
+
+  const matchesSearch =
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+  return matchesCategory && matchesSearch;
+});
+
+  const addToCart = (itemId: number) => {
+    const newCart = { ...cartItems, [itemId]: (cartItems[itemId] || 0) + 1 };
+    setCartItems(newCart);
+    localStorage.setItem('cartItems', JSON.stringify(newCart));
+  };
+
+  const updateQuantity = (itemId: number, quantity: number) => {
+    if (quantity <= 0) {
+      const { [itemId]: _, ...newCart } = cartItems;
+      setCartItems(newCart);
+      localStorage.setItem('cartItems', JSON.stringify(newCart));
+    } else {
+      const newCart = { ...cartItems, [itemId]: quantity };
+      setCartItems(newCart);
+      localStorage.setItem('cartItems', JSON.stringify(newCart));
+    }
+  };
+
+  const getTotalItems = () =>
+    Object.values(cartItems).reduce((sum, qty) => sum + qty, 0);
+
+  const getTotalPrice = () =>
+    Object.entries(cartItems).reduce((total, [itemId, qty]) => {
+      const item = menuItems.find(i => i.id === parseInt(itemId));
+      return total + (item ? item.price * qty : 0);
+    }, 0);
+
+  const getIngredientsList = (ingredients: any) => {
+    if (!ingredients) return [];
+    if (Array.isArray(ingredients)) return ingredients;
+    if (typeof ingredients === 'string') return ingredients.split(', ');
+    return [];
+  };
+
+  // ---------- Render ----------
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+
+      {/* Menu Header */}
+<section className="bg-gradient-to-b from-white to-gray-50 py-12">
+  <div className="container mx-auto px-4">
+    {/* Heading */}
+          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Visit Us</h2>
+
+
+    {/* Search bar */}
+    <div className="max-w-2xl mx-auto mb-8">
+      <div className="relative">
+        <label htmlFor="menu-search" className="sr-only">Search menu items</label>
+
+        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+          <i className="ri-search-line text-gray-400 text-lg" />
+        </div>
+
+        <input
+          id="menu-search"
+          type="search"
+          placeholder="Search menu items..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-12 pr-12 py-3 border border-gray-200 rounded-full shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition"
+        />
+
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => setSearchTerm('')}
+            aria-label="Clear search"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+          >
+            <i className="ri-close-line text-lg" />
+          </button>
+        )}
+      </div>
+    </div>
+
+    {/* Category grid */}
+    {loading ? (
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-6 animate-pulse">
+        <SkeletonCategory />
+        <div className="hidden md:block"><SkeletonCategory /></div>
+        <div className="hidden md:block"><SkeletonCategory /></div>
+        <div className="hidden lg:block"><SkeletonCategory /></div>
+        <div className="hidden lg:block"><SkeletonCategory /></div>
+        <div className="hidden lg:block"><SkeletonCategory /></div>
+      </div>
+    ) : categories.length === 0 ? (
+      <div className="text-center py-8">
+        <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
+          <i className="ri-folder-line text-2xl text-gray-400" />
+        </div>
+        <h3 className="text-xl font-semibold text-gray-600 mb-2">No Categories Available</h3>
+        <p className="text-gray-500">The owner needs to add categories and menu items</p>
+      </div>
+    ) : (
+      // compact responsive grid for consistent layout
+      <div className="max-w-5xl mx-auto mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {[...categories]
+            .sort((a: any, b: any) => {
+              // keep "all" first
+              if (a.id === 'all') return -1;
+              if (b.id === 'all') return 1;
+              return String(a.name).localeCompare(String(b.name));
+            })
+            .map((category: any) => {
+              const src = categoryIconMap?.[category.id] ?? null;
+              const isActive = selectedCategory === category.id;
+              const count =
+                category.id === 'all'
+                  ? menuItems.length
+                  : category.count ??
+                    menuItems.filter((it: any) => String(it.category_id) === String(category.id)).length;
+
+              return (
+                <button
+                  key={category.id}
+                  onClick={() => setSelectedCategory(category.id)}
+                  aria-pressed={isActive}
+                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-left transition transform ${
+                    isActive
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md'
+                      : 'bg-white border border-gray-100 text-gray-800 hover:shadow-sm hover:-translate-y-0.5'
+                  } focus:outline-none focus:ring-2 focus:ring-orange-300`}
+                  type="button"
+                >
+                  {/* avatar */}
+                  <div className={`flex-shrink-0 w-10 h-10 rounded-full overflow-hidden ${isActive ? 'ring-2 ring-white' : ''}`}>
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={category.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-orange-50 flex items-center justify-center">
+                        <i className={`ri-restaurant-line ${isActive ? 'text-white' : 'text-orange-600'} text-lg`} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* name + count */}
+                  <div className="flex items-center justify-between w-full">
+                    <span className={`truncate font-medium ${isActive ? 'text-white' : 'text-gray-800'}`}>
+                      {category.name}
+                    </span>
+
+                    <span className={`ml-3 inline-flex items-center justify-center text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      isActive ? 'bg-white/25 text-white' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {count}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+        </div>
+      </div>
+    )}
+  </div>
+</section>
+
+
+      {/* Cart Summary */}
+      {getTotalItems() > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-40">
+          <div className="container mx-auto flex justify-between items-center">
+            <div>
+              <span className="font-semibold text-gray-800">{getTotalItems()} items in cart</span>
+              <span className="ml-4 font-bold text-orange-600 text-lg">₨{getTotalPrice().toLocaleString()}</span>
+            </div>
+            <Link href="/cart" className="bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap">
+              View Cart
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function MenuPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading menu...</p>
+        </div>
+      </div>
+    }>
+      <MenuContent />
+    </Suspense>
   );
 }
