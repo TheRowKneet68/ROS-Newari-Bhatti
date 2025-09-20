@@ -305,7 +305,7 @@ export default function TrackOrderClient({ orderId }: TrackOrderClientProps) {
     phone: '+977-9841234567',
     estimatedTime: 30,
     orderDate: new Date().toISOString(),
-    restaurantInfo: { name: 'Newari Bhatti and Kathmandu Momo Ghar', address: 'Nadipur, Pokhara 33700, Nepal', phone: '+977-9829117277' },
+    restaurantInfo: { name: 'Newari Bhatti and Kathmandu Momo House', address: 'Nadipur, Pokhara 33700, Nepal', phone: '+977-9829117277' },
     paymentMethod: 'Cash on Delivery'
   });
 
@@ -403,7 +403,61 @@ export default function TrackOrderClient({ orderId }: TrackOrderClientProps) {
                   <span className="text-gray-600">Email:</span>
                   <p className="font-medium">{orderDetails.customer?.email}</p>
                 </div>
+
+
+
+
+
               </div>
+              {/* Delivery address (robust / tolerant) */}
+
+
+<div>
+
+
+{(
+  // determine if this is a delivery order (accept different naming)
+  ((orderDetails.orderType || orderDetails.order_type || orderDetails.order_type === 'delivery') || '')
+    .toString()
+    .toLowerCase() === 'delivery'
+) && (() => {
+  // normalize address from multiple possible places
+  const addr =
+    orderDetails.address ||
+    orderDetails.delivery_address ||
+    orderDetails.deliveryAddress ||
+    orderDetails.delivery ||
+    // sometimes stored directly on orderDetails as fields
+    (orderDetails.delivery_street || orderDetails.address_street ? {
+      street: orderDetails.delivery_street || orderDetails.address_street,
+      city: orderDetails.delivery_city || orderDetails.address_city,
+      state: orderDetails.delivery_state || orderDetails.address_state,
+      zipCode: orderDetails.delivery_zipCode || orderDetails.address_zipCode || orderDetails.delivery_zip || orderDetails.zipCode
+    } : null);
+
+  // helper to check if any address part exists
+  const hasAddr = addr && (addr.street || addr.city || addr.state || addr.zipCode || addr.postal || addr.pincode);
+
+  return (
+    <div className="">
+      <span className="text-gray-500">Address:</span>
+      <p className="font-medium text-sm flex justify-between items-start">
+
+        {hasAddr ? (
+          <>
+            {addr.street ? <>{addr.street}{addr.city || addr.state || addr.zipCode ? ', ' : ''}</> : null}
+            {addr.city ? <>{addr.city}{addr.state || addr.zipCode ? ', ' : ''}</> : null}
+            {addr.state ? <>{addr.state}{addr.zipCode ? ' ' : ''}</> : null}
+            {addr.zipCode || addr.postal || addr.pincode ? <>{addr.zipCode || addr.postal || addr.pincode}</> : null}
+          </>
+        ) : (
+          <p className="text-gray-400 text-sm">Address not available</p>
+        )}
+      </p>
+    </div>
+  );
+})()}
+</div>
             </div>
 
             {/* Estimated Time */}
