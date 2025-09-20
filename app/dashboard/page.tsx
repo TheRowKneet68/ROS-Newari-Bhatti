@@ -113,7 +113,7 @@ const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
 
 
 const [restaurantInfo, setRestaurantInfo] = useState({
-  name: 'Newari Bhatti and Kathmandu Momo Ghar',
+  name: 'Newari Bhatti and Kathmandu Momo House',
   phone: '+977-9829117277',
   email: 'info@newaribhatti.com',
   address: 'PCM College Agardi, Nadipur, Pokhara 33700, Nepal',
@@ -2490,6 +2490,9 @@ const handleAdminSave = async (payload: any) => {
                 ) : (
                   recentOrders.map((order) => (
                     <div key={order.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                     
+                     
+                     
                       <div className="flex-1">
                         <div className="flex items-center space-x-3">
                           <h3 className="font-semibold">Order #{order.id}</h3>
@@ -2511,6 +2514,12 @@ const handleAdminSave = async (payload: any) => {
                           {new Date(order.created_at || Date.now()).toLocaleString()}
                         </p>
                       </div>
+
+
+
+
+
+                      
                       <button
                         onClick={() => handleViewOrder(order)}
                         className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
