@@ -392,51 +392,51 @@ const normalizeUrl = (raw?: string | null): string | null => {
 
 
 
-// filtered + searched items for menu listing (case-insensitive, name/description/category)
-// Place this after the useEffect that sets searchResults (before parseTimeSafe)
-const filteredItems = useMemo(() => {
-  // shallow copy so we don't mutate original menuItems
-  let items = Array.isArray(menuItems) ? [...menuItems] : [];
+// // filtered + searched items for menu listing (case-insensitive, name/description/category)
+// // Place this after the useEffect that sets searchResults (before parseTimeSafe)
+// const filteredItems = useMemo(() => {
+//   // shallow copy so we don't mutate original menuItems
+//   let items = Array.isArray(menuItems) ? [...menuItems] : [];
 
-  // Filter by selectedCategory if set and not 'all'
-  if (selectedCategory && selectedCategory !== 'all') {
-    items = items.filter((it: any) => {
-      // item may have category_id, or category object with id/slug
-      if (String(it.category_id) === String(selectedCategory)) return true;
-      if (it.category) {
-        if (String(it.category.id) === String(selectedCategory)) return true;
-        if (String(it.category.slug) === String(selectedCategory)) return true;
-      }
-      return false;
-    });
-  }
+//   // Filter by selectedCategory if set and not 'all'
+//   if (selectedCategory && selectedCategory !== 'all') {
+//     items = items.filter((it: any) => {
+//       // item may have category_id, or category object with id/slug
+//       if (String(it.category_id) === String(selectedCategory)) return true;
+//       if (it.category) {
+//         if (String(it.category.id) === String(selectedCategory)) return true;
+//         if (String(it.category.slug) === String(selectedCategory)) return true;
+//       }
+//       return false;
+//     });
+//   }
 
-  // Apply search across name, description and category fields (case-insensitive)
-  const q = (searchTerm || '').trim().toLowerCase();
-  if (q.length > 0) {
-    items = items.filter((it: any) => {
-      const name = String(it.name || '').toLowerCase();
-      const desc = String(it.description || '').toLowerCase();
-      const catName = String(it.category?.name || it.category || '').toLowerCase();
-      const catSlug = String(it.category?.slug || '').toLowerCase();
-      return (
-        name.includes(q) ||
-        desc.includes(q) ||
-        catName.includes(q) ||
-        (catSlug && catSlug.includes(q))
-      );
-    });
-  }
+//   // Apply search across name, description and category fields (case-insensitive)
+//   const q = (searchTerm || '').trim().toLowerCase();
+//   if (q.length > 0) {
+//     items = items.filter((it: any) => {
+//       const name = String(it.name || '').toLowerCase();
+//       const desc = String(it.description || '').toLowerCase();
+//       const catName = String(it.category?.name || it.category || '').toLowerCase();
+//       const catSlug = String(it.category?.slug || '').toLowerCase();
+//       return (
+//         name.includes(q) ||
+//         desc.includes(q) ||
+//         catName.includes(q) ||
+//         (catSlug && catSlug.includes(q))
+//       );
+//     });
+//   }
 
-  // Sort final list A → Z by name (safe fallback)
-  items.sort((a: any, b: any) => {
-    const an = String(a.name || '').toLowerCase();
-    const bn = String(b.name || '').toLowerCase();
-    return an.localeCompare(bn);
-  });
+//   // Sort final list A → Z by name (safe fallback)
+//   items.sort((a: any, b: any) => {
+//     const an = String(a.name || '').toLowerCase();
+//     const bn = String(b.name || '').toLowerCase();
+//     return an.localeCompare(bn);
+//   });
 
-  return items;
-}, [menuItems, searchTerm, selectedCategory]);
+//   return items;
+// }, [menuItems, searchTerm, selectedCategory]);
 
 
 

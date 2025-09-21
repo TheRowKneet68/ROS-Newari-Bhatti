@@ -385,6 +385,159 @@ const filteredItems = menuItems.filter(item => {
   </div>
 </section>
 
+    {/* Menu Items */}
+<section className="py-8">
+  <div className="container mx-auto px-4">
+    {loading ? (
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse"><SkeletonCard /></div>
+        <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
+        <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
+        <div className="animate-pulse hidden lg:block"><SkeletonCard /></div>
+      </div>
+    ) : menuItems.length === 0 ? (
+      <div className="text-center py-16">
+        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i className="ri-restaurant-line text-2xl text-gray-400"></i>
+        </div>
+        <h3 className="text-xl font-semibold text-gray-600 mb-2">No Menu Items Available</h3>
+        <p className="text-gray-500 mb-6">The owner needs to add menu items to display here</p>
+        <Link href="/" className="bg-orange-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-orange-700 transition-colors cursor-pointer whitespace-nowrap">
+          Back to Home
+        </Link>
+      </div>
+    ) : filteredItems.length === 0 ? (
+      <div className="text-center py-16">
+        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i className="ri-search-line text-2xl text-gray-400"></i>
+        </div>
+        <h3 className="text-xl font-semibold text-gray-600 mb-2">No items found</h3>
+        <p className="text-gray-500">Try adjusting your search or filter criteria</p>
+      </div>
+    ) : (
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8" data-product-shop>
+        {[...filteredItems]
+          .sort((a: any, b: any) => {
+            const an = (a?.name ?? '').toLowerCase();
+            const bn = (b?.name ?? '').toLowerCase();
+            if (an < bn) return -1;
+            if (an > bn) return 1;
+            return 0;
+          })
+          .map((item) => {
+            const ingredientsList = getIngredientsList(item.ingredients);
+            const meta = item.__meta || {};
+            const isNew = !!meta.isNew;
+            const isEdited = !!meta.isEdited;
+
+            return (
+              <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
+                
+                {/* Image block */}
+                <div className="relative bg-gray-50">
+                  <div className="aspect-[4/3] bg-gray-100 flex items-center justify-center p-4 overflow-hidden">
+                    <img
+                      src={item.image_url || 'https://via.placeholder.com/400x300?text=Menu+Item'}
+                      alt={item.name}
+                      className="max-w-full max-h-full object-contain rounded-md"
+                      loading="lazy"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
+                    />
+                  </div>
+
+                  {/* Badges */}
+                  <div className="absolute top-3 left-3 flex gap-2 z-10">
+                    {isNew && (
+                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">NEW</span>
+                    )}
+                    {isEdited && (
+                      <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">EDITED</span>
+                    )}
+                  </div>
+
+                  {/* Veg pill */}
+                  {item.is_vegetarian && (
+                    <div className="absolute top-3 right-3 z-10">
+                      <div className="w-7 h-7 bg-green-600 rounded-full flex items-center justify-center">
+                        <div className="w-3 h-3 bg-white rounded-full" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Out of stock overlay */}
+                  {!item.is_available && (
+                    <div className="absolute inset-0 flex items-center justify-center z-20">
+                      <div className="w-full h-full bg-black bg-opacity-40 flex items-center justify-center">
+                        <span className="text-white font-semibold text-lg">Out of Stock</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="text-xl font-bold text-gray-800">{item.name}</h3>
+                    <span className="text-xl font-bold text-orange-600">₨{item.price}</span>
+                  </div>
+                  <p className="text-gray-600 mb-3">{item.description || 'Delicious traditional dish'}</p>
+
+                  {ingredientsList.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Ingredients:</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {ingredientsList.map((ingredient: string, index: number) => (
+                          <span key={index} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">{ingredient}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {cartItems[item.id] ? (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={() => updateQuantity(item.id, cartItems[item.id] - 1)}
+                          className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 cursor-pointer"
+                        >
+                          <i className="ri-subtract-line"></i>
+                        </button>
+                        <span className="font-semibold text-lg">{cartItems[item.id]}</span>
+                        <button
+                          onClick={() => updateQuantity(item.id, cartItems[item.id] + 1)}
+                          className="w-8 h-8 bg-orange-600 text-white rounded-full flex items-center justify-center hover:bg-orange-700 cursor-pointer"
+                        >
+                          <i className="ri-add-line"></i>
+                        </button>
+                      </div>
+                      <span className="font-bold text-orange-600">
+                        ₨{(item.price * cartItems[item.id]).toLocaleString()}
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => addToCart(item.id)}
+                      disabled={!item.is_available}
+                      className={`w-full py-3 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                        item.is_available
+                          ? 'bg-orange-600 text-white hover:bg-orange-700'
+                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      {item.is_available ? 'Add to Cart' : 'Out of Stock'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+      </div>
+    )}
+  </div>
+</section>
+
+
 
       {/* Cart Summary */}
       {getTotalItems() > 0 && (
