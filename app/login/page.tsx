@@ -309,10 +309,6 @@ const { data: profileRow, error: profileErr } = await supabase
 
 
 
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/main
         </div>
       </div>
     </div>
