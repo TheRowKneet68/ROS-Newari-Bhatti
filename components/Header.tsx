@@ -1,8 +1,9 @@
+// components/Header.tsx
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -10,106 +11,69 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-
-
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userType, setUserType] = useState('');
   const [userName, setUserName] = useState('');
   const [cartCount, setCartCount] = useState(0);
-const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
+  const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
+  const [restaurantLoading, setRestaurantLoading] = useState(true);
+  const [restaurantError, setRestaurantError] = useState<string | null>(null);
 
+  useEffect(() => {
+    let mounted = true;
 
-const [restaurantLoading, setRestaurantLoading] = useState(true);
-const [restaurantError, setRestaurantError] = useState<string | null>(null);
+    const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
+    const type = localStorage.getItem('userType') || 'user';
+    const userData = localStorage.getItem('userData');
 
+    setIsLoggedIn(loggedIn);
+    setUserType(type);
 
+    if (userData) {
+      const user = JSON.parse(userData);
+      setUserName(user.firstName || user.email || 'User');
+    }
 
+    async function loadFromSupabase() {
+      try {
+        setRestaurantLoading(true);
+        setRestaurantError(null);
 
+        const { data, error, status } = await supabase
+          .from('restaurant_info')
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .limit(1);
 
+        if (error && status !== 406) throw error;
 
-
-
-
-
-
-
-  
-useEffect(() => {
-  let mounted = true;
-
-  // --------------------------
-  // 1) Handle login + user data
-  // --------------------------
-  const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
-  const type = localStorage.getItem('userType') || 'user';
-  const userData = localStorage.getItem('userData');
-
-  setIsLoggedIn(loggedIn);
-  setUserType(type);
-
-  if (userData) {
-    const user = JSON.parse(userData);
-    setUserName(user.firstName || user.email || 'User');
-  }
-
-  // --------------------------
-  // 2) Load restaurant info from Supabase
-  // --------------------------
-  async function loadFromSupabase() {
-    try {
-      setRestaurantLoading(true);
-      setRestaurantError(null);
-
-      const { data, error, status } = await supabase
-        .from('restaurant_info')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(1);
-
-      if (error && status !== 406) {
-        throw error;
-      }
-
-      if (mounted) {
-        const row = Array.isArray(data) && data.length ? data[0] : null;
-        setrestaurant_info(row);
-      }
-    } catch (err: any) {
-      console.error('Failed to load restaurant_info from Supabase:', err);
-      if (mounted) {
-        setRestaurantError(err?.message ?? 'Failed to load restaurant info');
-      }
-    } finally {
-      if (mounted) {
-        setRestaurantLoading(false);
+        if (mounted) {
+          const row = Array.isArray(data) && data.length ? data[0] : null;
+          setrestaurant_info(row);
+        }
+      } catch (err: any) {
+        console.error('Failed to load restaurant_info from Supabase:', err);
+        if (mounted) setRestaurantError(err?.message ?? 'Failed to load restaurant info');
+      } finally {
+        if (mounted) setRestaurantLoading(false);
       }
     }
-  }
 
-  loadFromSupabase();
+    loadFromSupabase();
 
-  // --------------------------
-  // 3) Cart handling
-  // --------------------------
-  updateCartCount();
-
-  const handleStorageChange = () => {
     updateCartCount();
-  };
+    const handleStorageChange = () => updateCartCount();
+    window.addEventListener('storage', handleStorageChange);
+    const interval = setInterval(updateCartCount, 1000);
 
-  window.addEventListener('storage', handleStorageChange);
-  const interval = setInterval(updateCartCount, 1000);
-
-  // Cleanup
-  return () => {
-    mounted = false;
-    window.removeEventListener('storage', handleStorageChange);
-    clearInterval(interval);
-  };
-}, []);
-
+    return () => {
+      mounted = false;
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(interval);
+    };
+  }, []);
 
   const updateCartCount = () => {
     const cartItems = JSON.parse(localStorage.getItem('cartItems') || '{}');
@@ -127,14 +91,47 @@ useEffect(() => {
     window.location.href = '/';
   };
 
+  const logoSrc =
+    'https://nweybjowqtrqpdxqfwkg.supabase.co/storage/v1/object/public/menu-images/Banner/Logo.png';
+
   return (
     <header className="bg-white shadow-lg sticky top-0 z-50">
       <div className="container mx-auto px-4">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <Link href="/" className="text-2xl font-['Pacifico'] text-orange-600 cursor-pointer">
-             {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}
-          </Link>
+        <div className="flex items-center justify-between h-16 gap-4">
+          {/* Logo + Brand block */}
+          <div className="flex items-center gap-1">
+            
+            
+            
+            <Link href="/" className="flex items-center">
+              {/* Preferred: next/image (requires next.config domains) */}
+              <div className="relative w-10 h-10 md:w-14 md:h-14 flex-shrink-0">
+                <Image
+                  src={logoSrc}
+                  alt="Newari Bhatti & Kathmandu Momo Center logo"
+                  fill
+                  sizes="40px, 56px"
+                  
+                  priority={true} // set true if this is LCP
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
+
+
+
+<span className="ml-1 text-lg md:text-2xl font-['Pacifico'] text-orange-600  sm:inline-block scale-24 origin-left">
+  {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo Center'}
+</span>
+
+
+
+            </Link>
+
+
+
+
+            
+          </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-8">
@@ -150,7 +147,7 @@ useEffect(() => {
             <Link href="/reviews" className="text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
               Reviews
             </Link>
-            
+
             {isLoggedIn && (
               <>
                 <Link href="/orders" className="text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
@@ -169,7 +166,7 @@ useEffect(() => {
           <div className="hidden md:flex items-center space-x-4">
             {/* Cart */}
             <Link href="/cart" className="relative p-2 text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
-              <i className="ri-shopping-cart-line text-xl"></i>
+              <i className="ri-shopping-cart-line text-xl" aria-hidden="true" />
               {cartCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                   {cartCount > 99 ? '99+' : cartCount}
@@ -180,25 +177,22 @@ useEffect(() => {
             {isLoggedIn ? (
               <div className="relative group">
                 <button className="flex items-center space-x-2 text-gray-700 hover:text-orange-600 transition-colors cursor-pointer">
-                  <i className="ri-user-line text-xl"></i>
-                  <span>{userName}</span>
+                  <i className="ri-user-line text-xl" aria-hidden="true" />
+                  <span className="hidden sm:inline">{userName}</span>
                   <i className="ri-arrow-down-s-line"></i>
                 </button>
-                
+
                 <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                   <div className="py-2">
                     <Link href="/profile" className="block px-4 py-2 text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <i className="ri-user-line mr-2"></i>
-                      Profile
+                      <i className="ri-user-line mr-2" /> Profile
                     </Link>
                     <Link href="/orders" className="block px-4 py-2 text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <i className="ri-shopping-bag-line mr-2"></i>
-                      My Orders
+                      <i className="ri-shopping-bag-line mr-2" /> My Orders
                     </Link>
                     {(userType === 'admin' || userType === 'superadmin') && (
                       <Link href="/dashboard" className="block px-4 py-2 text-gray-700 hover:bg-gray-50 cursor-pointer">
-                        <i className="ri-dashboard-line mr-2"></i>
-                        Dashboard
+                        <i className="ri-dashboard-line mr-2" /> Dashboard
                       </Link>
                     )}
                     <hr className="my-2" />
@@ -206,8 +200,7 @@ useEffect(() => {
                       onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-red-600 hover:bg-red-50 cursor-pointer"
                     >
-                      <i className="ri-logout-box-line mr-2"></i>
-                      Logout
+                      <i className="ri-logout-box-line mr-2" /> Logout
                     </button>
                   </div>
                 </div>
@@ -225,11 +218,8 @@ useEffect(() => {
           </div>
 
           {/* Mobile Menu Button */}
-          <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="md:hidden p-2 cursor-pointer"
-          >
-            <i className={`${isMenuOpen ? 'ri-close-line' : 'ri-menu-line'} text-xl`}></i>
+          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 cursor-pointer">
+            <i className={`${isMenuOpen ? 'ri-close-line' : 'ri-menu-line'} text-xl`} aria-hidden="true" />
           </button>
         </div>
 
@@ -237,38 +227,23 @@ useEffect(() => {
         {isMenuOpen && (
           <div className="md:hidden border-t bg-white">
             <div className="py-4 space-y-2">
-              <Link href="/" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                Home
-              </Link>
-              <Link href="/menu" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                Menu
-              </Link>
-              <Link href="/contact" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                Contact
-              </Link>
-              <Link href="/reviews" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                Reviews
-              </Link>
-              
+              <Link href="/" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Home</Link>
+              <Link href="/menu" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Menu</Link>
+              <Link href="/contact" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Contact</Link>
+              <Link href="/reviews" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Reviews</Link>
+
               {isLoggedIn && (
                 <>
-                  <Link href="/profile" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                    Profile
-                  </Link>
-                  <Link href="/orders" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                    Orders
-                  </Link>
+                  <Link href="/profile" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Profile</Link>
+                  <Link href="/orders" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Orders</Link>
                   {(userType === 'admin' || userType === 'superadmin') && (
-                    <Link href="/dashboard" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                      Dashboard
-                    </Link>
+                    <Link href="/dashboard" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Dashboard</Link>
                   )}
                 </>
               )}
-              
+
               <Link href="/cart" className="flex items-center py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                <i className="ri-shopping-cart-line mr-2"></i>
-                Cart {cartCount > 0 && `(${cartCount})`}
+                <i className="ri-shopping-cart-line mr-2" aria-hidden="true" /> Cart {cartCount > 0 && `(${cartCount})`}
               </Link>
 
               <hr className="my-2" />
@@ -276,22 +251,14 @@ useEffect(() => {
               {isLoggedIn ? (
                 <div>
                   <p className="py-2 text-gray-600 font-medium">Welcome, {userName}</p>
-                  <button
-                    onClick={handleLogout}
-                    className="block w-full text-left py-2 text-red-600 cursor-pointer"
-                  >
-                    <i className="ri-logout-box-line mr-2"></i>
-                    Logout
+                  <button onClick={handleLogout} className="block w-full text-left py-2 text-red-600 cursor-pointer">
+                    <i className="ri-logout-box-line mr-2" aria-hidden="true" /> Logout
                   </button>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Link href="/login" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">
-                    Login
-                  </Link>
-                  <Link href="/register" className="block py-2 bg-orange-600 text-white text-center rounded-full hover:bg-orange-700 cursor-pointer">
-                    Sign Up
-                  </Link>
+                  <Link href="/login" className="block py-2 text-gray-700 hover:text-orange-600 cursor-pointer">Login</Link>
+                  <Link href="/register" className="block py-2 bg-orange-600 text-white text-center rounded-full hover:bg-orange-700 cursor-pointer">Sign Up</Link>
                 </div>
               )}
             </div>

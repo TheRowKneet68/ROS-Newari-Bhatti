@@ -1,3 +1,4 @@
+// next.config.ts
 import type { NextConfig } from "next";
 
 /**
@@ -6,13 +7,39 @@ import type { NextConfig } from "next";
  * comma-separated list (e.g. "localhost,127.0.0.1,192.168.1.69").
  */
 const allowedFromEnv = process.env.ALLOWED_DEV_ORIGINS
-  ? process.env.ALLOWED_DEV_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
+  ? process.env.ALLOWED_DEV_ORIGINS
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
   : [];
 
 const nextConfig: NextConfig = {
   images: {
+    // keep unoptimized true for dev or if you don't want Next's image optimization
+    // (you can set to false later if you want Next to optimize images)
     unoptimized: true,
+
+    // allow these remote hosts when using next/image or when OG metadata references remote images
+    domains: [
+      "nweybjowqtrqpdxqfwkg.supabase.co", // Supabase storage (your current logo)
+      "newaribhattiandkathmandumomoghar.com", // your own domain (if you host logo in /public)
+    ],
+
+    // remotePatterns gives you more fine-grained control (optional but helpful)
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "nweybjowqtrqpdxqfwkg.supabase.co",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "newaribhattiandkathmandumomoghar.com",
+        pathname: "/**",
+      },
+    ],
   },
+
   eslint: {
     // 🚀 Ignore ESLint errors/warnings during builds
     ignoreDuringBuilds: true,

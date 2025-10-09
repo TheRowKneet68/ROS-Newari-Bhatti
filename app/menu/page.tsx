@@ -18,6 +18,18 @@ function MenuContent() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalCategoryId, setModalCategoryId] = useState<string | number | null>(null);
+
+
+
+
+
+
+
+
   // ---------- Skeletons ----------
   const SkeletonCategory = () => (
     <div className="flex flex-col items-center">
@@ -78,15 +90,39 @@ function MenuContent() {
   }, [categories]);
 
   // ---------- Effects ----------
-  useEffect(() => {
-    try {
-      const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
-      setCartItems(savedCart);
-    } catch {
-      setCartItems({});
+// restore cart + load menu data (run once on mount)
+useEffect(() => {
+  try {
+    const savedCart = JSON.parse(localStorage.getItem('cartItems') || '{}');
+    setCartItems(savedCart);
+  } catch {
+    setCartItems({});
+  }
+
+  // call the async loader
+  loadMenuData();
+}, []);
+
+// ESC key closes modal (only active while modalOpen)
+useEffect(() => {
+  if (!modalOpen) return;
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setModalOpen(false);
+      setModalCategoryId(null);
     }
-    loadMenuData();
-  }, []);
+  };
+  window.addEventListener('keydown', onKey);
+  return () => window.removeEventListener('keydown', onKey);
+}, [modalOpen]);
+
+
+
+
+
+
+
 
   const loadMenuData = async () => {
     try {
@@ -220,6 +256,18 @@ const filteredItems = menuItems.filter(item => {
   return matchesCategory && matchesSearch;
 });
 
+
+  const modalCategoryCount = (() => {
+    if (!modalCategoryId) return 0;
+    if (String(modalCategoryId) === 'all') return menuItems.length;
+    return menuItems.filter(i =>
+      String(i.category_id ?? i.category?.id ?? '') === String(modalCategoryId)
+    ).length;
+  })();
+
+
+
+
   const addToCart = (itemId: number) => {
     const newCart = { ...cartItems, [itemId]: (cartItems[itemId] || 0) + 1 };
     setCartItems(newCart);
@@ -263,7 +311,7 @@ const filteredItems = menuItems.filter(item => {
 <section className="bg-gradient-to-b from-white to-gray-50 py-12">
   <div className="container mx-auto px-4">
     {/* Heading */}
-          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Visit Us</h2>
+          <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">Our Menu</h2>
 
 
     {/* Search bar */}
@@ -338,7 +386,12 @@ const filteredItems = menuItems.filter(item => {
               return (
                 <button
                   key={category.id}
-                  onClick={() => setSelectedCategory(category.id)}
+                  onClick={() => {
+  setSelectedCategory(category.id);
+  setModalCategoryId(category.id);
+  setModalOpen(true);
+}}
+
                   aria-pressed={isActive}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-left transition transform ${
                     isActive
@@ -375,6 +428,10 @@ const filteredItems = menuItems.filter(item => {
                     }`}>
                       {count}
                     </span>
+
+
+
+                    
                   </div>
                 </button>
               );
@@ -536,6 +593,123 @@ const filteredItems = menuItems.filter(item => {
     )}
   </div>
 </section>
+
+{/* Category Modal (fixed and clean) */}
+{modalOpen && (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    {/* Backdrop */}
+    <button
+      onClick={() => { setModalOpen(false); setModalCategoryId(null); }}
+      className="absolute inset-0 bg-black/50"
+      aria-hidden="true"
+    />
+
+    {/* Panel: flex-column so footer can be outside the scrollable area */}
+    <div
+      className="relative w-full max-w-4xl sm:rounded-xl bg-white shadow-2xl overflow-hidden
+                 sm:mx-4 sm:my-8 flex flex-col sm:max-h-[80vh] max-h-[90vh]"
+      role="dialog"
+      aria-modal="true"
+    >
+      {/* Header */}
+      <div className="flex justify-between items-center px-4 py-3 border-b">
+        <h3 className="font-semibold text-lg">
+          {categories.find((c) => String(c.id) === String(modalCategoryId))?.name ?? 'Category'}
+            <span className="inline-flex ml-3 items-center justify-center bg-orange-500 text-white font-semibold text-sm w-8 h-8 rounded-full shadow-sm">
+              {modalCategoryCount}
+            </span>
+
+
+        </h3>
+
+
+
+
+
+                <button
+                  onClick={() => { setModalOpen(false); setModalCategoryId(null); }}
+                  aria-label="Close"
+                  className="p-2 rounded-md hover:bg-gray-100"
+                >
+                  <i className="ri-close-line text-2xl text-gray-600" />
+                </button>
+        </div>
+
+
+
+
+
+      {/* Scrollable content */}
+      <div className="overflow-auto p-4 sm:p-6 flex-1" style={{ minHeight: 0 }}>
+
+
+{/* Replace the existing grid block with this: alphabetical order (case-insensitive) */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  {menuItems
+    .filter((item) => {
+      // keep existing filtering behavior:
+      if (modalCategoryId === 'all' || modalCategoryId === null) return true;
+      return String(item.category_id) === String(modalCategoryId);
+    })
+    // sort alphabetically by name (case-insensitive, locale-aware)
+    .sort((a, b) => {
+      const an = (a?.name ?? '').toString();
+      const bn = (b?.name ?? '').toString();
+      // use localeCompare for better language handling; 'base' sensitivity ignores accents/case
+      return an.localeCompare(bn, undefined, { sensitivity: 'base', numeric: true });
+    })
+    .map((item) => (
+      <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm flex gap-4">
+        <img
+          src={item.image_url || '/images/placeholder-food.png'}
+          alt={item.name}
+          className="w-24 h-20 object-cover rounded"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-food.png'; }}
+        />
+        <div className="flex-1">
+          <div className="flex justify-between items-start">
+            <h4 className="font-medium">{item.name}</h4>
+            <span className="text-orange-600 font-semibold">₨{item.price}</span>
+          </div>
+          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</p>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              onClick={() => addToCart(item.id)}
+              className="px-3 py-1 bg-orange-600 text-white rounded text-sm"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    ))}
+</div>
+
+
+
+      </div>
+
+      {/* Footer - always visible (sticky) */}
+      <div className="border-t px-4 py-4 bg-white">
+        <div className="container mx-auto flex items-center justify-between max-w-4xl">
+          <div className="text-sm">
+            <span className="font-semibold text-gray-800">{getTotalItems()} items in cart</span>
+            <span className="ml-4 font-bold text-orange-600 text-lg">₨{getTotalPrice().toLocaleString()}</span>
+          </div>
+
+          <Link
+            href="/cart"
+            onClick={() => { setModalOpen(false); setModalCategoryId(null); }}
+            className="inline-flex items-center px-6 py-3 rounded-full bg-orange-600 text-white font-semibold hover:bg-orange-700 transition-colors"
+          >
+            View Cart
+          </Link>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 
 
 
