@@ -1,0 +1,7 @@
+{
+  "/api/admins/list/route": "app/api/admins/list/route.js",
+  "/page": "app/page.js",
+  "/menu/page": "app/menu/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/login/page": "app/login/page.js"
+}

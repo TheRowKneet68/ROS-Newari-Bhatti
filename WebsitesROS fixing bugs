@@ -1,0 +1,13 @@
+  backup-local-before-rollback                 [m c4ea65d Fix: remove merge conflict markers (keep local HEAD versions)
+  backup/main-before-force-push                [m b68ec1d WIP: save local changes before rebasing
+  cleanup/remove-build-artifacts               [m 27e7f2b chore: remove nested repo mirror and backup; replace .gitignore with canonical Next.js ignore; remove sample hooks; remove BOM from workflow
+  feat/add-map-embed                           [m 4d5f2be [[34morigin/feat/add-map-embed[m: ahead 2, behind 11] Update project to use safe env vars and clean up code
+* [32mmain                                         [m b68ec1d [[34morigin/main[m: behind 4] WIP: save local changes before rebasing
+  remote-backup                                [m 8ca04f6 [[34morigin/main[m: behind 8] Merge remote changes
+  [31mremotes/origin/backup-local                  [m efb31b4 Merge branch 'main' of https://github.com/TheRowKneet68/ROS-Newari-Bhatti
+  [31mremotes/origin/backup-local-before-rollback  [m c4ea65d Fix: remove merge conflict markers (keep local HEAD versions)
+  [31mremotes/origin/backup/main-before-force-push [m b68ec1d WIP: save local changes before rebasing
+  [31mremotes/origin/cleanup/remove-build-artifacts[m 27e7f2b chore: remove nested repo mirror and backup; replace .gitignore with canonical Next.js ignore; remove sample hooks; remove BOM from workflow
+  [31mremotes/origin/feat/add-map-embed            [m 31c3866 Merge branch 'main' into feat/add-map-embed
+  [31mremotes/origin/main                          [m 99687e9 Update page.tsx
+  [31mremotes/origin/remote-backup                 [m 8ca04f6 Merge remote changes
