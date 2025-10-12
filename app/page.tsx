@@ -9,7 +9,7 @@ import ReviewForm from '../components/ReviewForm';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
-
+import Image from 'next/image';
 
 import ContactForm from '../components/ContactForm';
 import QuestionForm from '../components/QuestionForm';
@@ -678,68 +678,157 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      {/* Hero Section */}
-      <section className="relative bg-gradient-to-r from-orange-600 to-red-600 text-white py-20"
-        style={{
-          backgroundImage: `linear-gradient(rgba(251,146,60,0.8), rgba(220,38,38,0.8)), url('https://readdy.ai/api/search-image?query=Traditional%20Newari%20restaurant%20interior&width=1200&height=600')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        }}>
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-5xl md:text-6xl font-bold mb-6">Authentic Newari Cuisine</h1>
-          <p className="text-xl md:text-2xl mb-8 max-w-2xl mx-auto">
-  Experience traditional flavors at {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'} in the heart of Pokhara
-</p>
 
 
-          {/* Search bar (replaces Track Order) */}
-          <div ref={searchRef} className="max-w-2xl mx-auto w-full relative">
-            <div className="flex items-center gap-4 justify-center">
-              <div className="relative w-full">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                  <i className="ri-search-line text-gray-200 text-lg"></i>
-                </div>
-                <input
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setSearchOpen(true);
-                  }}
-                  onFocus={() => setSearchOpen(true)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setSearchOpen(false);
-                      setSearchTerm('');
-                    }
-                    if (e.key === 'Enter' && searchResults.length > 0) {
-                      onSelectResult(searchResults[0]);
-                    }
-                  }}
-                  placeholder="Search menu items..."
-                  className="w-full pl-12 pr-4 py-4 rounded-full bg-white bg-opacity-20 placeholder-white placeholder-opacity-90 focus:bg-white focus:bg-opacity-100 focus:text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-400 transition-all"
-                />
-              </div>
+
+
+
+
+
+{/* Hero Section — Responsive: beautiful on mobile & desktop */}
+<section className="relative w-full bg-gray-800 pt-20 z-11" style={{ minHeight: '100px', maxHeight: '490px'  } }>
+  {/* background image behind everything */}
+  <div className="absolute inset-0 -z-0">
+
+
+
+
+
+    <img
+      src="https://nweybjowqtrqpdxqfwkg.supabase.co/storage/v1/object/public/menu-images/Banner/newari-khaja-ghar-board%20(2).jpg"
+      alt="Newari Khaja Ghar background"
+      className="w-auto h-auto object-cover ml-[100px] mt-[-40px]  md:mt-[10px]"
+      style={{ maxHeight: '450px',minHeight: '400px'  }}
+    />
+  </div>
+
+
+
+
+
+
+
+
+  {/* overlay for contrast (keeps text readable) */}
+  <div className="absolute inset-0 -z-0 bg-gray-900/30"></div>
+
+  {/* content wrapper */}
+  <div className="relative container mx-auto px-4 ">
+    {/* layout: single column on mobile, 12-col grid on md+ so content sits right of characters */}
+    <div className="grid grid-cols-1 md:grid-cols-12 items-center min-h-[100px]  ">
+      {/* left gap on md so characters remain visible */}
+      <div className="hidden md:block md:col-span-4" />
+
+      {/* content column */}
+      <div className="col-span-1 md:col-span-8 flex flex-col justify-center items-center md:items-start mt-0 md:mt-[-80px] text-center md:text-left py-12">
+        {/* Backdrop: semi-opaque on small screens, transparent on md+ */}
+        
+        
+        <div className="w-full max-w-3xl px-4 py-6 rounded-lg bg-black/15 backdrop-blur-sm md:bg-transparent ">
+
+        {/* Logo */}
+
+
+
+
+          {/* Responsive headline: clamp + Tailwind sizes */}
+          <h1
+            className="font-extrabold text-white leading-tight"
+            style={{
+              fontSize: 'clamp(1.6rem, 4.6vw, 3.6rem)', /* smooth scaling */
+            }}
+          >
+            Newari Bhatti & Kathmandu Momo Center
+          </h1>
+
+                    <p
+            className=" mt-3 text-white"
+            style={{
+              fontSize: 'clamp(1rem, 3vw, 2rem)', /* smooth scaling */
+            }}
+          >
+            Authentic Newari Cuisine
+          </p>
+
+          <p className="mt-3 text-white/90 max-w-2xl"
+             style={{ fontSize: 'clamp(0.86rem, 2.4vw, 1.05rem)' }}>
+            Experience traditional flavors at{" "}
+            <span className="font-semibold text-white">
+              {restaurant_info?.name ?? "Newari Bhatti & Kathmandu Momo Center"}
+            </span>{" "}
+            in the heart of Pokhara
+          </p>
+
+          {/* Search + Browse — stacked on mobile, inline on md+ */}
+          <div className="mt-5">
+            <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+<div className="relative w-full sm:flex-1">
+  {/* Search Icon */}
+  <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className="h-5 w-5 text-black/70 focus:text-black/70"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"
+      />
+    </svg>
+  </div>
+
+  {/* Search Input */}
+  <input
+    type="search"
+    aria-label="Search menu items"
+    value={searchTerm}
+    onChange={(e) => {
+      setSearchTerm(e.target.value);
+      setSearchOpen(true);
+    }}
+    onFocus={() => setSearchOpen(true)}
+    onKeyDown={(e) => {
+      if (e.key === "Escape") {
+        setSearchOpen(false);
+        setSearchTerm("");
+      }
+      if (e.key === "Enter" && searchResults?.length > 0) {
+        onSelectResult(searchResults[0]);
+      }
+    }}
+    placeholder="Search menu items..."
+    className="w-full pl-12 pr-4 py-3 rounded-full
+               bg-white/20 placeholder-white/85
+               focus:bg-white/95 focus:text-gray-900
+               focus:outline-none focus:ring-2 focus:ring-orange-400
+               focus:placeholder-black transition"
+  />
+</div>
+
 
               <button
                 onClick={() => {
-                  // quick go to full menu page with optional query param
                   if (searchTerm && searchTerm.trim().length > 0) {
-                    // push search param to menu for later extension
                     router.push(`/menu?search=${encodeURIComponent(searchTerm.trim())}`);
                   } else {
-                    router.push('/menu');
+                    router.push("/menu");
                   }
                 }}
-                className="bg-white text-orange-600 px-6 py-3 rounded-full font-semibold hover:bg-gray-100 transition-colors whitespace-nowrap"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-3 rounded-full bg-white text-orange-600 font-semibold hover:opacity-95 transition"
               >
                 Browse Menu
               </button>
             </div>
 
-            {/* live dropdown */}
-            {searchOpen && searchTerm.trim().length > 0 && (
-              <div className="absolute left-0 right-0 mt-3 bg-white rounded-xl shadow-lg z-50 max-h-96 overflow-auto">
-                {searchResults.length === 0 ? (
+            {/* live dropdown — keeps absolute positioning but inside container */}
+            {searchOpen && searchTerm?.trim().length > 0 && (
+              <div className="mt-3 bg-white rounded-xl shadow-lg z-50 max-h-80 overflow-auto">
+                {(!searchResults || searchResults.length === 0) ? (
                   <div className="p-4 text-sm text-gray-600">No results</div>
                 ) : (
                   searchResults.map((item) => (
@@ -749,7 +838,7 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
                       className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-4 border-b last:border-b-0"
                     >
                       <img
-                        src={item.image_url || item.image || 'https://readdy.ai/api/search-image?query=delicious%20nepali%20food&width=120&height=80'}
+                        src={item.image_url || item.image || "https://readdy.ai/api/search-image?query=delicious%20nepali%20food&width=120&height=80"}
                         alt={item.name}
                         loading="lazy"
                         className="w-16 h-12 object-cover rounded-md flex-shrink-0"
@@ -767,9 +856,21 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
               </div>
             )}
           </div>
-
         </div>
-      </section>
+        {/* end backdrop box */}
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+
+
+
 
 
 
@@ -904,32 +1005,33 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
                 key={item.id}
                 className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow relative"
               >
-                <div className="aspect-video relative bg-gray-100 flex items-center justify-center">
-                  <img
-                    src={item.image_url || "/images/placeholder-food.png"}
-                    alt={item.name}
-                    className="max-h-full max-w-full object-contain object-center"
-                    loading="lazy"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src =
-                        "/images/placeholder-food.png";
-                    }}
-                  />
+{/* Image wrapper — quick fix */}
+<div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center overflow-hidden">
+  <img
+    src={item.image_url || "/images/placeholder-food.png"}
+    alt={item.name}
+    loading="lazy"
+    onError={(e) => {
+      (e.currentTarget as HTMLImageElement).src = "/images/placeholder-food.png";
+    }}
+    className="w-full h-full object-cover object-center transition-transform duration-300 ease-out hover:scale-105"
+  />
 
-                  {/* Badges in top-left */}
-                  <div className="absolute top-3 left-3 flex gap-2">
-                    {isNew && (
-                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">
-                        NEW
-                      </span>
-                    )}
-                    {isEdited && (
-                      <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">
-                        EDITED
-                      </span>
-                    )}
-                  </div>
-                </div>
+  {/* Badges in top-left */}
+  <div className="absolute top-3 left-3 flex gap-2 z-10">
+    {isNew && (
+      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full font-semibold">
+        NEW
+      </span>
+    )}
+    {isEdited && (
+      <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded-full font-semibold">
+        EDITED
+      </span>
+    )}
+  </div>
+</div>
+
 
                 <div className="p-6">
                   <div className="flex justify-between items-start mb-2">
@@ -1204,7 +1306,7 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
                 <div className="flex items-start space-x-3">
                   <i className="ri-restaurant-line text-xl text-orange-600 mt-1"></i>
                   <div>
-                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</p>
+                    <p className="font-semibold text-gray-800">{restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo Center'}</p>
                     <p className="text-gray-600">Authentic Newari cuisine in Pokhara</p>
                   </div>
                 </div>
@@ -1291,7 +1393,7 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
                 <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
                   <i className="ri-restaurant-line text-white text-lg"></i>
                 </div>
-                <span className="font-['Pacifico'] text-xl text-orange-400"> {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}</span>
+                <span className="font-['Pacifico'] text-xl text-orange-400"> {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo Center'}</span>
               </div>
               <p className="text-gray-400">Serving authentic Newari cuisine and traditional Nepali flavors since 2015. Experience the taste of Nepal in Pokhara.</p>
             </div>
@@ -1422,7 +1524,7 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
           </div>
 
 <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-  <p>&copy; 2024 {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo House'}. All rights reserved.</p>
+  <p>&copy; 2024 {restaurant_info?.name ?? 'Newari Bhatti & Kathmandu Momo Center'}. All rights reserved.</p>
 </div>
         </div>
       </footer>
