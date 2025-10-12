@@ -13,16 +13,21 @@ const allowedFromEnv = process.env.ALLOWED_DEV_ORIGINS
       .filter(Boolean)
   : [];
 
+// treat as production when NODE_ENV === "production"
+const isProd = process.env.NODE_ENV === "production";
+
 const nextConfig: NextConfig = {
+  reactStrictMode: true,
+
   images: {
-    // keep unoptimized true for dev or if you don't want Next's image optimization
-    // (you can set to false later if you want Next to optimize images)
-    unoptimized: true,
+    // Enable Next's image optimization in production, but keep unoptimized in dev
+    // for faster local iteration or when using non-optimized setups.
+    unoptimized: !isProd,
 
     // allow these remote hosts when using next/image or when OG metadata references remote images
     domains: [
-      "nweybjowqtrqpdxqfwkg.supabase.co", // Supabase storage (your current logo)
-      "newaribhattiandkathmandumomoghar.com", // your own domain (if you host logo in /public)
+      "nweybjowqtrqpdxqfwkg.supabase.co", // Supabase storage (your logo & menu images)
+      "newaribhattiandkathmandumomoghar.com", // your domain (if you host assets in /public)
     ],
 
     // remotePatterns gives you more fine-grained control (optional but helpful)
@@ -41,24 +46,19 @@ const nextConfig: NextConfig = {
   },
 
   eslint: {
-    // 🚀 Ignore ESLint errors/warnings during builds
-    ignoreDuringBuilds: true,
+    // Do not ignore ESLint errors in production builds
+    ignoreDuringBuilds: !isProd,
   },
   typescript: {
-    // 🚀 Ignore TS type errors during builds (optional, if needed)
-    ignoreBuildErrors: true,
+    // Do not ignore TypeScript build errors in production
+    ignoreBuildErrors: !isProd,
   },
 
-  // Add allowedDevOrigins so other devices on your LAN (or different hosts) can
-  // request _next/* dev assets without that cross-origin warning.
-  // Keep this list minimal and ONLY for development.
+  // Allow other local/dev hosts to request _next/* dev assets
   allowedDevOrigins: [
-    // common local entries:
     "localhost",
     "127.0.0.1",
-    // add your dev machine / phone IP that triggered the warning (example):
     "192.168.1.69",
-    // plus any from the ALLOWED_DEV_ORIGINS env var
     ...allowedFromEnv,
   ],
 };
