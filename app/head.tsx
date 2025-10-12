@@ -1,3 +1,4 @@
+
 // app/head.tsx
 export default function Head() {
   const siteUrl = "https://newaribhattiandkathmandumomoghar.com";
@@ -57,3 +58,4 @@ export default function Head() {
     </>
   );
 }
+
