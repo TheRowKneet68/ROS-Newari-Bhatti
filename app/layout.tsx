@@ -28,6 +28,11 @@ const geistMono = Geist_Mono({
  * - Replace address / coords / phone / social links with the real values if needed.
  */
 const SITE_URL = "https://newaribhattiandkathmandumomoghar.com";
+
+// Use the working OG image URL (your Supabase file currently has two dots in the name)
+const OG_IMAGE =
+  "https://nweybjowqtrqpdxqfwkg.supabase.co/storage/v1/object/public/menu-images/Banner/og-logo-1200x630..png";
+
 const LOGO =
   "https://nweybjowqtrqpdxqfwkg.supabase.co/storage/v1/object/public/menu-images/Banner/Logo.png";
 const DEFAULT_IMAGE = LOGO;
@@ -58,6 +63,8 @@ export const metadata: Metadata = {
     "Newari restaurant Nepal",
     "Thakali food Pokhara",
     "best momo near me",
+    "best newari resturant near me",
+    "newari resturant near me",
     "Newari Bhatti & Kathmandu Momo Center",
   ],
   authors: [{ name: "Newari Bhatti & Kathmandu Momo Center", url: SITE_URL }],
@@ -82,18 +89,11 @@ export const metadata: Metadata = {
     locale: "en_US",
     images: [
       {
-        url: LOGO,
-        alt: "Newari Bhatti & Kathmandu Momo Center - Logo",
+        url: OG_IMAGE,
+        alt: "Newari Bhatti & Kathmandu Momo Center - Banner",
         width: 1200,
         height: 630,
       },
-
-      
-      // Recommended: add a high-quality banner image (1200x630) and include it here:
-      // { url: new URL('/images/og-banner.jpg', SITE_URL).toString(), alt: 'Momos and Newari dishes', width: 1200, height: 630 }
-    
-    
-    
     ],
     type: "website",
   },
@@ -102,7 +102,7 @@ export const metadata: Metadata = {
     title: "Newari Bhatti & Kathmandu Momo Center",
     description:
       "Authentic Newari & Kathmandu-style momos, thakali sets and local Nepali dishes in Pokhara. Order pickup or delivery.",
-    images: [LOGO],
+    images: [OG_IMAGE],
   },
   icons: {
     icon: LOGO,
@@ -123,7 +123,7 @@ const schema = {
   name: "Newari Bhatti & Kathmandu Momo Center",
   url: SITE_URL,
   logo: LOGO,
-  image: [DEFAULT_IMAGE],
+  image: [OG_IMAGE, DEFAULT_IMAGE],
   description:
     "Authentic Newari & Kathmandu-style momos and local dishes. Order online for pickup or delivery.",
   telephone: "+9779813113874", // use international format, no dashes
@@ -153,8 +153,8 @@ const schema = {
   servesCuisine: ["Nepali", "Newari", "Momos"],
   sameAs: [
     "https://www.facebook.com/profile.php?id=61570343842043", // replace with official links
-    "https://api.whatsapp.com/send?phone=%2B9779813113874&context=AfdzvzzXGFWXTefh0gyuJPLJw_idce3TMihWRPurM4ImGlGvmEbyC1jMimr4dJ0M2JrSHQ7szPXZhIBM_UMDlioCP2BVrXwCk28aLytaZSx0RRfVCjPT3e_owwjAN3ubkiKQApb0giWQcG9nOotdgBBopw&source=FB_Page&app=facebook&entry_point=page_cta",
-    "https://maps.app.goo.gl/Dhvo4qtoJDi68ZS4A"
+    "https://api.whatsapp.com/send?phone=%2B9779813113874",
+    "https://maps.app.goo.gl/Dhvo4qtoJDi68ZS4A",
   ],
   menu: new URL("/menu", SITE_URL).toString(),
   hasMenu: new URL("/menu", SITE_URL).toString(),
