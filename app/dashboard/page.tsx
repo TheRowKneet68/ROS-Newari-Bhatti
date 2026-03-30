@@ -11,7 +11,6 @@ import { useRef } from 'react';
 
 
 
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -27,6 +26,10 @@ if (typeof window !== 'undefined') {
 
 
 export default function DashboardPage() {
+
+
+  const [popupImage, setPopupImage] = useState<string | null>(null);
+  const [popupEnabled, setPopupEnabled] = useState(false);
   const [userQuestions, setUserQuestions] = useState<any[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(true);
   const BUCKETNAME = 'menu-images';
@@ -157,7 +160,19 @@ const makeFilename = (originalName: string) => {
 };
 
 
+const loadPopup = async () => {
+  try {
+    const res = await fetch("/api/popup/get");
+    const data = await res.json();
 
+    if (data) {
+      setPopupImage(data.image_url);
+      setPopupEnabled(data.is_active);
+    }
+  } catch (err) {
+    console.error("Failed to load popup", err);
+  }
+};
 
 // helpers to edit / delete social links in restaurantInfo
 const handleEditSocial = (field: 'facebook_url' | 'instagram_url' | 'tiktok_url') => {
@@ -273,10 +288,37 @@ useEffect(() => {
       console.error("useEffect fetchAdmins failed:", err);
     }
   })();
+
+  loadPopup();
 }, []);
 
 
+const savePopup = async () => {
+  try {
+    let imageUrl = popupImage;
 
+    // if new image uploaded
+    if (uploadedImageUrl) {
+      imageUrl = uploadedImageUrl;
+    }
+
+    await fetch("/api/popup/update", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        image_url: imageUrl,
+        is_active: popupEnabled
+      })
+    });
+
+    showSuccessToast("Popup updated!");
+  } catch (err) {
+    console.error(err);
+    showErrorToast("Failed to update popup");
+  }
+};
 
 
 const askQuestion = async (questionText: string) => {
@@ -2435,6 +2477,8 @@ const handleAdminSave = async (payload: any) => {
           >
             Menu Items
           </button>
+
+
           <button
             onClick={() => setActiveTab('categories')}
             className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
@@ -2446,9 +2490,16 @@ const handleAdminSave = async (payload: any) => {
             Categories
           </button>
 
-
-
-
+<button
+  onClick={() => setActiveTab('popup')}
+  className={`flex-1 py-2 px-4 rounded-full font-semibold transition-colors cursor-pointer whitespace-nowrap text-sm ${
+    activeTab === 'popup'
+      ? 'bg-white text-orange-600 shadow-sm'
+      : 'text-gray-600 hover:text-gray-800'
+  }`}
+>
+  Popup Notice
+</button>
 
 </div>
 
@@ -3257,6 +3308,119 @@ const handleAdminSave = async (payload: any) => {
     </div>
   </div>
 )}
+
+
+{activeTab === 'popup' && (
+  <div className="bg-white rounded-2xl shadow-lg p-6 space-y-6 border">
+
+    {/* Header */}
+    <div className="flex justify-between items-center">
+      <h2 className="text-xl font-semibold text-gray-800">
+        Popup Notice Settings
+      </h2>
+
+      <span className={`px-3 py-1 text-xs rounded-full font-medium ${
+        popupEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+      }`}>
+        {popupEnabled ? 'ACTIVE' : 'INACTIVE'}
+      </span>
+    </div>
+
+    {/* Toggle */}
+    <div className="flex items-center justify-between bg-gray-50 p-4 rounded-xl">
+      <div>
+        <p className="font-medium text-gray-800">Enable Popup</p>
+        <p className="text-sm text-gray-500">Show popup on homepage</p>
+      </div>
+
+      <button
+        onClick={() => setPopupEnabled(!popupEnabled)}
+        className={`px-5 py-2 rounded-full font-semibold transition ${
+          popupEnabled
+            ? 'bg-green-600 text-white hover:bg-green-700'
+            : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+        }`}
+      >
+        {popupEnabled ? 'Enabled' : 'Disabled'}
+      </button>
+    </div>
+
+    {/* Image Section */}
+    <div className="space-y-4">
+
+      {/* Current Image */}
+      {popupImage && (
+        <div>
+          <p className="text-sm text-gray-500 mb-2">Current Image</p>
+          <img
+            src={popupImage}
+            alt="Current Popup"
+            className="w-full max-w-md rounded-lg shadow border"
+          />
+        </div>
+      )}
+
+      {/* New Upload Preview */}
+      {uploadedImageUrl && (
+        <div>
+          <p className="text-sm text-blue-500 mb-2">New Image Preview</p>
+          <img
+            src={uploadedImageUrl}
+            alt="New Popup"
+            className="w-full max-w-md rounded-lg shadow border ring-2 ring-blue-400"
+          />
+        </div>
+      )}
+
+      {/* Upload Input */}
+      <div className="bg-gray-50 p-4 rounded-xl">
+        <p className="text-sm text-gray-500 mb-2">Upload New Image</p>
+
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleFileInputChange}
+          className="block w-full text-sm"
+        />
+
+        <p className="text-xs text-gray-400 mt-2">
+          Recommended size: 800×600 or similar
+        </p>
+      </div>
+    </div>
+
+    {/* Actions */}
+    <div className="flex justify-between items-center pt-4 border-t">
+
+      {/* Cancel */}
+      <button
+        onClick={() => {
+          setUploadedImageUrl(null);
+        }}
+        className="text-gray-500 hover:text-gray-700 text-sm"
+      >
+        Cancel Changes
+      </button>
+
+      {/* Save */}
+      <button
+        onClick={() => {
+          // if (!confirm("Are you sure you want to update the popup?")) return;
+          savePopup();
+        }}
+        className="bg-orange-600 text-white px-6 py-2 rounded-full font-semibold hover:bg-orange-700 transition"
+      >
+        Save Changes
+      </button>
+    </div>
+
+  </div>
+)}
+
+
+
+
+
 
 
       </div>
