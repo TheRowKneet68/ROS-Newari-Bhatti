@@ -9,6 +9,11 @@ import ReviewForm from '../components/ReviewForm';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
+
+import PopupNotice from '../components/PopupNotice';
+
+
+
 import Image from 'next/image';
 
 import ContactForm from '../components/ContactForm';
@@ -32,6 +37,13 @@ const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
 // const [restaurant_info, setrestaurant_info] = useState<any | null>(null);
 const [restaurantLoading, setRestaurantLoading] = useState(true);
 const [restaurantError, setRestaurantError] = useState<string | null>(null);
+
+
+
+
+
+
+
 
 // ---------- Restaurant info (load from Supabase directly) ----------
 useEffect(() => {
@@ -674,11 +686,10 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
     );
   };
 
-  return (
+return (
+  <>
+    <PopupNotice />
     <div className="min-h-screen bg-gray-50">
-      <Header />
-
-
 
 
 
@@ -1529,5 +1540,6 @@ setFeaturedItems(enriched.filter((i: any) => !!i.featured).slice(0, 35));
         </div>
       </footer>
     </div>
+  </>
   );
 }
